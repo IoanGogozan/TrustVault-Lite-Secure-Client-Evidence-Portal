@@ -7,6 +7,7 @@
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "pnpm -r build",
+    "dev:api": "pnpm --filter @trustvault/api dev",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
@@ -17,4 +18,3 @@
     "vitest": "^3.2.0"
   }
 }
-
