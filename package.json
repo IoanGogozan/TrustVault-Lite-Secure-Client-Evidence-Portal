@@ -8,6 +8,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev:api": "pnpm --filter @trustvault/api dev",
+    "dev:web": "pnpm --filter @trustvault/web dev",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
