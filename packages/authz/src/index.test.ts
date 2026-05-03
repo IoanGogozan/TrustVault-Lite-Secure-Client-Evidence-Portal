@@ -20,7 +20,9 @@ describe("roleAllows", () => {
     expect(roleAllows("owner", "documents:delete")).toBe(true);
     expect(roleAllows("owner", "api_keys:revoke")).toBe(true);
     expect(roleAllows("admin", "members:update_role")).toBe(true);
+    expect(roleAllows("admin", "projects:update")).toBe(true);
     expect(roleAllows("viewer", "documents:read")).toBe(true);
+    expect(roleAllows("viewer", "projects:create")).toBe(false);
     expect(roleAllows("viewer", "documents:create")).toBe(false);
   });
 });
@@ -77,6 +79,35 @@ describe("can", () => {
     });
 
     expect(decision.allowed).toBe(true);
+  });
+
+  it("allows project reads only within assigned projects for scoped roles", () => {
+    expect(
+      can(activeMember, "projects:read", {
+        tenantId: "tenant_a",
+        projectId: "project_1"
+      }).allowed
+    ).toBe(true);
+    expect(
+      can(activeMember, "projects:read", {
+        tenantId: "tenant_a",
+        projectId: "project_2"
+      })
+    ).toEqual({
+      allowed: false,
+      reason: "project_access_missing"
+    });
+  });
+
+  it("denies project creation for members", () => {
+    expect(
+      can(activeMember, "projects:create", {
+        tenantId: "tenant_a"
+      })
+    ).toEqual({
+      allowed: false,
+      reason: "permission_missing"
+    });
   });
 
   it("denies restricted documents to normal members", () => {

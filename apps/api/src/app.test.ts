@@ -219,6 +219,141 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(response.json()).toEqual({ error: "tenant_slug_taken" });
   });
 
+  it("lists only projects visible to the current role", async () => {
+    const store = createDemoStore();
+    store.projects.push({
+      id: "project_acme_legal",
+      tenantId: "tenant_acme",
+      name: "Legal Review",
+      classification: "restricted",
+      createdBy: "user_owner_acme",
+      createdAt: new Date("2026-05-03T00:00:00.000Z")
+    });
+    const app = buildApp({ store });
+    const cookie = await login(app, "member@acme.test");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/projects",
+      headers: { cookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().projects).toEqual([
+      expect.objectContaining({
+        id: "project_acme_soc2",
+        tenantId: "tenant_acme",
+        name: "SOC 2 Evidence"
+      })
+    ]);
+    expect(JSON.stringify(response.json())).not.toContain("project_acme_legal");
+  });
+
+  it("allows admins to create projects and records an audit event", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "admin@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        name: "Vendor Evidence",
+        classification: "internal"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().project).toMatchObject({
+      tenantId: "tenant_acme",
+      name: "Vendor Evidence",
+      classification: "internal",
+      createdBy: "user_admin_acme"
+    });
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "project.created",
+      entityType: "project",
+      entityId: response.json().project.id,
+      result: "success"
+    });
+  });
+
+  it("denies project creation for members", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "member@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        name: "Member Project",
+        classification: "internal"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "authorization.denied",
+      entityType: "project",
+      result: "failure",
+      metadata: expect.objectContaining({
+        requestedAction: "projects:create"
+      })
+    });
+  });
+
+  it("allows admins to update projects and records an audit event", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "admin@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/projects/project_acme_soc2",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        name: "SOC 2 Evidence Room",
+        classification: "restricted"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().project).toMatchObject({
+      id: "project_acme_soc2",
+      name: "SOC 2 Evidence Room",
+      classification: "restricted"
+    });
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "project.updated",
+      entityType: "project",
+      entityId: "project_acme_soc2",
+      result: "success"
+    });
+  });
+
+  it("denies project updates for members", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "member@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/projects/project_acme_soc2",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        name: "Unauthorized Rename"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(store.projects.find((project) => project.id === "project_acme_soc2")?.name).toBe(
+      "SOC 2 Evidence"
+    );
+  });
+
   it("allows owners to invite a new member", async () => {
     const app = buildApp({ store: createDemoStore() });
     const cookie = await login(app, "owner@acme.test");

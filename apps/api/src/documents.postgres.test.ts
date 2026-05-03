@@ -2,6 +2,7 @@ import { DatabasePool, withTenantContext } from "@trustvault/database";
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { buildApp } from "./app.js";
 import { PostgresDocumentRepository } from "./documents.js";
+import { PostgresProjectRepository } from "./projects.js";
 import {
   createDemoStore,
   type AppStore,
@@ -167,6 +168,50 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
     });
     expect(cleanDownloadResponse.json().download).not.toHaveProperty("storageKey");
   });
+
+  it("lists and creates projects in the selected tenant context", async () => {
+    const app = buildApp({
+      store: createUuidStore(),
+      documentRepository: new PostgresDocumentRepository(database),
+      projectRepository: new PostgresProjectRepository(database)
+    });
+    const cookie = await login(app, "owner-db@acme.test");
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/projects",
+      headers: { cookie, "x-tenant-id": tenantAId }
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().projects).toEqual([
+      expect.objectContaining({
+        id: tenantAProjectId,
+        tenantId: tenantAId,
+        name: "Tenant A Project"
+      })
+    ]);
+    expect(JSON.stringify(listResponse.json())).not.toContain(tenantBProjectId);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      headers: { cookie, "x-tenant-id": tenantAId },
+      payload: {
+        name: "Tenant A API Evidence",
+        classification: "internal",
+        tenantId: tenantBId
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json().project).toMatchObject({
+      tenantId: tenantAId,
+      name: "Tenant A API Evidence",
+      classification: "internal",
+      createdBy: ownerUserId
+    });
+  });
 });
 
 async function seedDatabase(database: DatabasePool): Promise<void> {
@@ -191,7 +236,7 @@ async function seedDatabase(database: DatabasePool): Promise<void> {
     await tx.execute(
       `INSERT INTO projects (id, tenant_id, name, classification, created_by)
        VALUES ($1, $2, 'Tenant A Project', 'confidential', $3)
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, classification = EXCLUDED.classification`,
       [tenantAProjectId, tenantAId, ownerUserId]
     );
     await tx.execute(
@@ -213,13 +258,19 @@ async function seedDatabase(database: DatabasePool): Promise<void> {
          AND id <> $3`,
       [tenantAId, tenantAProjectId, tenantADocumentId]
     );
+    await tx.execute(
+      `DELETE FROM projects
+       WHERE tenant_id = $1
+         AND id <> $2`,
+      [tenantAId, tenantAProjectId]
+    );
   });
 
   await withTenantContext(database, tenantBId, async (tx) => {
     await tx.execute(
       `INSERT INTO projects (id, tenant_id, name, classification, created_by)
        VALUES ($1, $2, 'Tenant B Project', 'confidential', $3)
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, classification = EXCLUDED.classification`,
       [tenantBProjectId, tenantBId, ownerUserId]
     );
     await tx.execute(
@@ -240,6 +291,12 @@ async function seedDatabase(database: DatabasePool): Promise<void> {
          AND project_id = $2
          AND id <> $3`,
       [tenantBId, tenantBProjectId, tenantBDocumentId]
+    );
+    await tx.execute(
+      `DELETE FROM projects
+       WHERE tenant_id = $1
+         AND id <> $2`,
+      [tenantBId, tenantBProjectId]
     );
   });
 }

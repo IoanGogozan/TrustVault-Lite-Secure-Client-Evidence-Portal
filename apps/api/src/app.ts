@@ -25,11 +25,17 @@ import {
   type DocumentReadScope,
   type DocumentRepository
 } from "./documents.js";
+import {
+  InMemoryProjectRepository,
+  type ProjectReadScope,
+  type ProjectRepository
+} from "./projects.js";
 import { InMemoryScanJobQueue, type ScanJobQueue } from "./scan-worker.js";
 
 export type BuildAppOptions = {
   store?: AppStore;
   documentRepository?: DocumentRepository;
+  projectRepository?: ProjectRepository;
   scanQueue?: ScanJobQueue;
   storage?: PrivateObjectStorage;
 };
@@ -38,6 +44,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const config = readBaseConfig();
   const store = options.store ?? createDemoStore();
   const documentRepository = options.documentRepository ?? new InMemoryDocumentRepository(store);
+  const projectRepository = options.projectRepository ?? new InMemoryProjectRepository(store);
   const storage = options.storage ?? new InMemoryPrivateObjectStorage(store.storageObjects);
   const scanQueue =
     options.scanQueue ?? new InMemoryScanJobQueue(store, documentRepository, storage);
@@ -66,7 +73,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       .header("Access-Control-Allow-Origin", origin)
       .header("Access-Control-Allow-Credentials", "true")
       .header("Access-Control-Allow-Headers", "Content-Type, X-Tenant-Id")
-      .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      .header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
       .header("Vary", "Origin")
       .code(204)
       .send();
@@ -209,6 +216,158 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         mfaRequired: request.tenantContext.membership.mfaRequired
       }
     };
+  });
+
+  app.get("/projects", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const allowed = await requirePermission(store, request, reply, "projects:read", {
+      tenantId: request.tenantContext.tenant.id,
+      entityType: "project"
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    return {
+      projects: (await projectRepository.list(toProjectReadScope(request.tenantContext))).map(
+        toProjectResponse
+      )
+    };
+  });
+
+  app.post<{
+    Body: {
+      name?: string;
+      classification?: DocumentClassification;
+    };
+  }>("/projects", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const name = normalizeName(request.body.name);
+    const classification = request.body.classification ?? "confidential";
+
+    if (!name) {
+      return reply.code(400).send({ error: "project_name_required" });
+    }
+
+    if (!isDocumentClassification(classification)) {
+      return reply.code(400).send({ error: "invalid_classification" });
+    }
+
+    const allowed = await requirePermission(store, request, reply, "projects:create", {
+      tenantId: request.tenantContext.tenant.id,
+      classification,
+      entityType: "project"
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    const project = await projectRepository.create({
+      tenantId: request.tenantContext.tenant.id,
+      name,
+      classification,
+      createdBy: request.tenantContext.user.id
+    });
+    appendAuditEvent(store, request, {
+      action: "project.created",
+      entityType: "project",
+      entityId: project.id,
+      result: "success",
+      metadata: {
+        classification: project.classification
+      }
+    });
+
+    return reply.code(201).send({ project: toProjectResponse(project) });
+  });
+
+  app.patch<{
+    Params: { projectId: string };
+    Body: {
+      name?: string;
+      classification?: DocumentClassification;
+    };
+  }>("/projects/:projectId", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const project =
+      (await projectRepository.findByIdForAuthorization?.(request.params.projectId)) ??
+      (await projectRepository.findVisibleById(
+        toProjectReadScope(request.tenantContext),
+        request.params.projectId
+      ));
+
+    if (!project) {
+      return reply.code(404).send({ error: "project_not_found" });
+    }
+
+    const name = request.body.name === undefined ? undefined : normalizeName(request.body.name);
+    const classification = request.body.classification;
+
+    if (request.body.name !== undefined && !name) {
+      return reply.code(400).send({ error: "project_name_required" });
+    }
+
+    if (classification !== undefined && !isDocumentClassification(classification)) {
+      return reply.code(400).send({ error: "invalid_classification" });
+    }
+
+    if (name === undefined && classification === undefined) {
+      return reply.code(400).send({ error: "project_update_required" });
+    }
+
+    const allowed = await requirePermission(store, request, reply, "projects:update", {
+      tenantId: project.tenantId,
+      projectId: project.id,
+      classification: classification ?? project.classification,
+      entityType: "project",
+      entityId: project.id
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    const updatedProject = await projectRepository.update(
+      toProjectReadScope(request.tenantContext),
+      project.id,
+      {
+        ...(name ? { name } : {}),
+        ...(classification ? { classification } : {})
+      }
+    );
+
+    if (!updatedProject) {
+      return reply.code(404).send({ error: "project_not_found" });
+    }
+
+    appendAuditEvent(store, request, {
+      action: "project.updated",
+      entityType: "project",
+      entityId: updatedProject.id,
+      result: "success",
+      metadata: {
+        classification: updatedProject.classification
+      }
+    });
+
+    return { project: toProjectResponse(updatedProject) };
   });
 
   app.patch<{
@@ -452,7 +611,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: "invalid_classification" });
     }
 
-    const project = store.projects.find((candidate) => candidate.id === projectId);
+    const project =
+      (await projectRepository.findByIdForAuthorization?.(projectId)) ??
+      (await projectRepository.findVisibleById(toProjectReadScope(request.tenantContext), projectId));
 
     if (!project) {
       return reply.code(404).send({ error: "project_not_found" });
@@ -943,6 +1104,24 @@ function isDocumentClassification(value: string): value is DocumentClassificatio
   );
 }
 
+function toProjectResponse(project: {
+  id: string;
+  tenantId: string;
+  name: string;
+  classification: DocumentClassification;
+  createdBy: string;
+  createdAt: Date;
+}) {
+  return {
+    id: project.id,
+    tenantId: project.tenantId,
+    name: project.name,
+    classification: project.classification,
+    createdBy: project.createdBy,
+    createdAt: project.createdAt.toISOString()
+  };
+}
+
 function toDocumentResponse(document: {
   id: string;
   tenantId: string;
@@ -996,6 +1175,14 @@ function decodeBase64(value: string): Buffer | undefined {
 }
 
 function toDocumentReadScope(context: TenantRequestContext): DocumentReadScope {
+  return {
+    tenantId: context.tenant.id,
+    role: context.membership.role,
+    ...(context.membership.projectIds ? { projectIds: context.membership.projectIds } : {})
+  };
+}
+
+function toProjectReadScope(context: TenantRequestContext): ProjectReadScope {
   return {
     tenantId: context.tenant.id,
     role: context.membership.role,

@@ -11,6 +11,15 @@ TrustVault Lite uses a documented mock scan worker for the Phase 4 demo. The des
 - The internal worker endpoint processes one queued job for the selected tenant.
 - The mock scanner marks files as `blocked` when the private object contains the demo markers `eicar` or `malware-demo`; otherwise it marks the version as `clean`.
 
+## Storage Boundary
+
+The storage package exposes two implementations:
+
+- `InMemoryPrivateObjectStorage` for local tests and demo flows.
+- `S3CompatiblePrivateObjectStorage` for MinIO or S3-compatible clients.
+
+The S3-compatible adapter accepts a small client interface instead of importing a specific cloud SDK. That keeps the API testable and allows the implementation to be wired to MinIO, AWS S3 or another object store later.
+
 ## Worker Endpoint
 
 `POST /internal/scan-jobs/process-next`

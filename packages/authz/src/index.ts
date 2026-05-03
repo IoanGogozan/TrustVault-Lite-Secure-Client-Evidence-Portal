@@ -13,6 +13,10 @@ export type Permission =
   | "tenant:update"
   | "members:invite"
   | "members:update_role"
+  | "projects:create"
+  | "projects:read"
+  | "projects:update"
+  | "projects:*"
   | "documents:create"
   | "documents:read"
   | "documents:update"
@@ -57,6 +61,7 @@ export const permissionsByRole: Record<Role, readonly Permission[]> = {
     "tenant:update",
     "members:invite",
     "members:update_role",
+    "projects:*",
     "documents:*",
     "audit:read",
     "api_keys:*",
@@ -66,14 +71,15 @@ export const permissionsByRole: Record<Role, readonly Permission[]> = {
   admin: [
     "members:invite",
     "members:update_role",
+    "projects:*",
     "documents:*",
     "audit:read",
     "api_keys:read",
     "security:read"
   ],
-  member: ["documents:create", "documents:read", "documents:update"],
-  viewer: ["documents:read"],
-  auditor: ["documents:read", "audit:read", "security:read"],
+  member: ["projects:read", "documents:create", "documents:read", "documents:update"],
+  viewer: ["projects:read", "documents:read"],
+  auditor: ["projects:read", "documents:read", "audit:read", "security:read"],
   support_operator: ["support_access:request", "support_access:use"]
 };
 

@@ -7,6 +7,7 @@ import type {
   DocumentVersion,
   MembershipRole
 } from "./domain.js";
+import { canSeeProject } from "./projects.js";
 
 export type DocumentReadScope = {
   tenantId: string;
@@ -345,14 +346,6 @@ export class PostgresDocumentRepository implements DocumentRepository {
       return document ? version : undefined;
     });
   }
-}
-
-function canSeeProject(scope: DocumentReadScope, projectId: string): boolean {
-  if (scope.role === "owner" || scope.role === "admin" || scope.role === "auditor") {
-    return true;
-  }
-
-  return scope.projectIds?.includes(projectId) ?? false;
 }
 
 type DocumentRow = {
