@@ -6,6 +6,7 @@ export type MembershipStatus = "active" | "invited" | "suspended";
 export type InvitationStatus = "pending" | "accepted" | "revoked";
 export type DocumentClassification = "public" | "internal" | "confidential" | "restricted";
 export type ScanStatus = "pending_scan" | "clean" | "blocked";
+export type ScanJobStatus = "queued" | "processing" | "completed" | "failed";
 
 export type User = {
   id: string;
@@ -71,6 +72,19 @@ export type DocumentVersion = {
   createdAt: Date;
 };
 
+export type ScanJob = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  storageKey: string;
+  status: ScanJobStatus;
+  queuedBy: string;
+  attempts: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type Session = {
   id: string;
   userId: string;
@@ -98,6 +112,7 @@ export type AppStore = {
   projects: Project[];
   documents: Document[];
   documentVersions: DocumentVersion[];
+  scanJobs: ScanJob[];
   storageObjects: Record<string, string>;
   invitations: Invitation[];
   auditEvents: AuditEvent[];
@@ -313,6 +328,7 @@ export function createDemoStore(): AppStore {
         createdAt: now
       }
     ],
+    scanJobs: [],
     storageObjects: {},
     invitations: [],
     auditEvents: [],

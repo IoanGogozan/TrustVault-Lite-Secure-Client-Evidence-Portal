@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import { redactAuditMetadata } from "@trustvault/audit";
 import { readBaseConfig } from "@trustvault/config";
+import { InMemoryPrivateObjectStorage, type PrivateObjectStorage } from "@trustvault/storage";
 import { validateDocumentUpload } from "@trustvault/validation";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
@@ -23,16 +25,22 @@ import {
   type DocumentReadScope,
   type DocumentRepository
 } from "./documents.js";
+import { InMemoryScanJobQueue, type ScanJobQueue } from "./scan-worker.js";
 
 export type BuildAppOptions = {
   store?: AppStore;
   documentRepository?: DocumentRepository;
+  scanQueue?: ScanJobQueue;
+  storage?: PrivateObjectStorage;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const config = readBaseConfig();
   const store = options.store ?? createDemoStore();
   const documentRepository = options.documentRepository ?? new InMemoryDocumentRepository(store);
+  const storage = options.storage ?? new InMemoryPrivateObjectStorage(store.storageObjects);
+  const scanQueue =
+    options.scanQueue ?? new InMemoryScanJobQueue(store, documentRepository, storage);
   const app = Fastify({
     logger: config.env === "production"
   });
@@ -541,6 +549,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         toDocumentReadScope(request.tenantContext),
         request.params.documentId
       );
+      appendAuditEvent(store, request, {
+        action: "document.deleted",
+        entityType: "document",
+        entityId: document.id,
+        result: "success",
+        metadata: {
+          projectId: document.projectId,
+          classification: document.classification
+        }
+      });
 
       return reply.code(204).send();
     }
@@ -613,10 +631,39 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const version = await documentRepository.uploadVersion({
       tenantId: request.tenantContext.tenant.id,
       documentId: document.id,
+      storageKey: (
+        await storage.put({
+          tenantId: request.tenantContext.tenant.id,
+          documentId: document.id,
+          contentType: mimeType,
+          content
+        })
+      ).storageKey,
       originalFilename,
       mimeType,
-      content,
+      sizeBytes: content.byteLength,
+      sha256: createHash("sha256").update(content).digest("hex"),
       uploadedBy: request.tenantContext.user.id
+    });
+    await scanQueue.enqueue({
+      tenantId: request.tenantContext.tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      storageKey: version.storageKey,
+      queuedBy: request.tenantContext.user.id
+    });
+    appendAuditEvent(store, request, {
+      action: "document.uploaded",
+      entityType: "document_version",
+      entityId: version.id,
+      result: "success",
+      metadata: {
+        documentId: document.id,
+        originalFilename,
+        mimeType,
+        sizeBytes: content.byteLength,
+        sha256: version.sha256
+      }
     });
 
     return reply.code(201).send({ version: toDocumentVersionResponse(version) });
@@ -652,7 +699,48 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       return reply.code(404).send({ error: "document_version_not_found" });
     }
 
+    appendAuditEvent(store, request, {
+      action: scanStatus === "clean" ? "document.scan_clean" : "document.scan_blocked",
+      entityType: "document_version",
+      entityId: version.id,
+      result: scanStatus === "clean" ? "success" : "failure",
+      metadata: {
+        documentId: version.documentId,
+        scanStatus
+      }
+    });
+
     return { version: toDocumentVersionResponse(version) };
+  });
+
+  app.post("/internal/scan-jobs/process-next", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    if (request.tenantContext.membership.role !== "owner" && request.tenantContext.membership.role !== "admin") {
+      return reply.code(403).send({ error: "permission_denied" });
+    }
+
+    const job = await scanQueue.processNext(request.tenantContext.tenant.id);
+
+    if (!job) {
+      return reply.code(204).send();
+    }
+
+    return {
+      scanJob: {
+        id: job.id,
+        tenantId: job.tenantId,
+        documentId: job.documentId,
+        versionId: job.versionId,
+        status: job.status,
+        attempts: job.attempts,
+        updatedAt: job.updatedAt.toISOString()
+      }
+    };
   });
 
   app.get<{ Params: { documentId: string } }>(
@@ -700,6 +788,21 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         return reply.code(409).send({ error: "file_not_available_until_clean_scan" });
       }
 
+      const signedDownload = await storage.createSignedDownload({
+        storageKey: version.storageKey,
+        expiresInSeconds: 300
+      });
+      appendAuditEvent(store, request, {
+        action: "document.downloaded",
+        entityType: "document_version",
+        entityId: version.id,
+        result: "success",
+        metadata: {
+          documentId: document.id,
+          expiresAt: signedDownload.expiresAt.toISOString()
+        }
+      });
+
       return {
         download: {
           documentId: document.id,
@@ -707,7 +810,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           originalFilename: version.originalFilename,
           mimeType: version.mimeType,
           sizeBytes: version.sizeBytes,
-          expiresInSeconds: 300
+          expiresInSeconds: 300,
+          expiresAt: signedDownload.expiresAt.toISOString()
         }
       };
     }
@@ -797,6 +901,37 @@ async function denyMembershipRoleChange(
   });
 
   await reply.code(403).send({ error: "permission_denied" });
+}
+
+function appendAuditEvent(
+  store: AppStore,
+  request: Parameters<typeof requirePermission>[1],
+  input: {
+    action: string;
+    entityType: string;
+    entityId?: string;
+    result: "success" | "failure";
+    metadata: Record<string, unknown>;
+  }
+): void {
+  if (!request.tenantContext) {
+    return;
+  }
+
+  store.auditEvents.push({
+    id: `audit_${randomUUID()}`,
+    tenantId: request.tenantContext.tenant.id,
+    actorUserId: request.tenantContext.user.id,
+    actorType: "user",
+    action: input.action,
+    entityType: input.entityType,
+    ...(input.entityId ? { entityId: input.entityId } : {}),
+    result: input.result,
+    ipHash: hashSecret(request.ip),
+    userAgent: request.headers["user-agent"] ?? "unknown",
+    metadata: redactAuditMetadata(input.metadata),
+    createdAt: new Date()
+  });
 }
 
 function isDocumentClassification(value: string): value is DocumentClassification {

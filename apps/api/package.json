@@ -18,6 +18,7 @@
     "@trustvault/authz": "workspace:*",
     "@trustvault/config": "workspace:*",
     "@trustvault/database": "workspace:*",
+    "@trustvault/storage": "workspace:*",
     "@trustvault/validation": "workspace:*",
     "fastify": "^5.6.0"
   },

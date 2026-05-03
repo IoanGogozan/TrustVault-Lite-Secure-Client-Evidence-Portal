@@ -1,5 +1,5 @@
 import { withTenantContext, type DatabasePool } from "@trustvault/database";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   AppStore,
   Document,
@@ -25,9 +25,11 @@ export type CreateDocumentInput = {
 export type UploadDocumentVersionInput = {
   tenantId: string;
   documentId: string;
+  storageKey: string;
   originalFilename: string;
   mimeType: string;
-  content: Buffer;
+  sizeBytes: number;
+  sha256: string;
   uploadedBy: string;
 };
 
@@ -120,18 +122,17 @@ export class InMemoryDocumentRepository implements DocumentRepository {
       id: `version_${randomUUID()}`,
       tenantId: input.tenantId,
       documentId: input.documentId,
-      storageKey: `${input.tenantId}/documents/${input.documentId}/${randomUUID()}`,
+      storageKey: input.storageKey,
       originalFilename: input.originalFilename,
       mimeType: input.mimeType,
-      sizeBytes: input.content.byteLength,
-      sha256: createHash("sha256").update(input.content).digest("hex"),
+      sizeBytes: input.sizeBytes,
+      sha256: input.sha256,
       scanStatus: "pending_scan" as const,
       uploadedBy: input.uploadedBy,
       createdAt: new Date()
     };
 
     this.store.documentVersions.push(version);
-    this.store.storageObjects[version.storageKey] = input.content.toString("base64");
     document.currentVersionId = version.id;
     document.storageKey = version.storageKey;
 
@@ -258,11 +259,11 @@ export class PostgresDocumentRepository implements DocumentRepository {
         [
           input.tenantId,
           input.documentId,
-          `${input.tenantId}/documents/${input.documentId}/${randomUUID()}`,
+          input.storageKey,
           input.originalFilename,
           input.mimeType,
-          input.content.byteLength,
-          createHash("sha256").update(input.content).digest("hex"),
+          input.sizeBytes,
+          input.sha256,
           input.uploadedBy
         ]
       );

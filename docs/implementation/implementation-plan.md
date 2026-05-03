@@ -155,6 +155,11 @@ Tasks:
 - Worker marks the file as `clean` or `blocked`.
 - Allow download only for `clean` files.
 
+Current worker note:
+
+- Phase 4 starts with a documented mock scan worker in `docs/implementation/phase-4-scan-worker.md`.
+- The mock queue can be replaced with Redis and BullMQ without changing the document upload boundary.
+
 ## Phase 5: Share Links
 
 Tasks:
@@ -239,4 +244,3 @@ Pipeline:
 - `make test-security`;
 - `make zap-scan`;
 - well-structured public README.
-

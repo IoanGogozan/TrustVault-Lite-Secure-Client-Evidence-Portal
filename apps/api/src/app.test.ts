@@ -613,6 +613,12 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(response.statusCode).toBe(204);
     expect(store.documents.find((document) => document.id === "document_acme_policy")?.deletedAt)
       .toBeInstanceOf(Date);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "document.deleted",
+      entityType: "document",
+      entityId: "document_acme_policy",
+      result: "success"
+    });
   });
 
   it("denies document version uploads for viewers", async () => {
@@ -686,6 +692,16 @@ describe("phase 1 auth and tenant foundation", () => {
       scanStatus: "pending_scan"
     });
     expect(upload.json().version).not.toHaveProperty("storageKey");
+    expect(store.scanJobs).toHaveLength(1);
+    expect(store.scanJobs[0]).toMatchObject({
+      tenantId: "tenant_acme",
+      documentId: "document_acme_policy",
+      versionId: upload.json().version.id,
+      status: "queued"
+    });
+    expect(store.auditEvents.map((event) => event.action)).toEqual(
+      expect.arrayContaining(["document.uploaded", "document.scan_queued"])
+    );
 
     const download = await app.inject({
       method: "GET",
@@ -734,6 +750,7 @@ describe("phase 1 auth and tenant foundation", () => {
       expiresInSeconds: 300
     });
     expect(download.json().download).not.toHaveProperty("storageKey");
+    expect(download.json().download).not.toHaveProperty("storagePath");
   });
 
   it("keeps blocked files unavailable for download", async () => {
@@ -765,6 +782,93 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(download.statusCode).toBe(409);
     expect(download.json()).toEqual({ error: "file_not_available_until_clean_scan" });
   });
+
+  it("processes the queued scan job and transitions clean files to downloadable", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+    const adminCookie = await login(app, "admin@acme.test");
+
+    const upload = await app.inject({
+      method: "POST",
+      url: "/documents/document_acme_policy/versions",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: pdfUploadPayload()
+    });
+    const versionId = upload.json().version.id;
+
+    const scanJob = await app.inject({
+      method: "POST",
+      url: "/internal/scan-jobs/process-next",
+      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(scanJob.statusCode).toBe(200);
+    expect(scanJob.json().scanJob).toMatchObject({
+      tenantId: "tenant_acme",
+      documentId: "document_acme_policy",
+      versionId,
+      status: "completed",
+      attempts: 1
+    });
+    expect(store.documentVersions.find((version) => version.id === versionId)?.scanStatus).toBe(
+      "clean"
+    );
+    expect(store.auditEvents.map((event) => event.action)).toEqual(
+      expect.arrayContaining(["document.scan_clean"])
+    );
+
+    const download = await app.inject({
+      method: "GET",
+      url: "/documents/document_acme_policy/download",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(download.statusCode).toBe(200);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "document.downloaded",
+      entityType: "document_version",
+      entityId: versionId,
+      result: "success"
+    });
+  });
+
+  it("processes the queued scan job and keeps malware-demo files blocked", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+    const adminCookie = await login(app, "admin@acme.test");
+
+    const upload = await app.inject({
+      method: "POST",
+      url: "/documents/document_acme_policy/versions",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: pdfUploadPayload("malware-demo")
+    });
+    const versionId = upload.json().version.id;
+
+    const scanJob = await app.inject({
+      method: "POST",
+      url: "/internal/scan-jobs/process-next",
+      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(scanJob.statusCode).toBe(200);
+    expect(store.documentVersions.find((version) => version.id === versionId)?.scanStatus).toBe(
+      "blocked"
+    );
+    expect(store.auditEvents.map((event) => event.action)).toEqual(
+      expect.arrayContaining(["document.scan_blocked"])
+    );
+
+    const download = await app.inject({
+      method: "GET",
+      url: "/documents/document_acme_policy/download",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(download.statusCode).toBe(409);
+  });
 });
 
 async function login(app: ReturnType<typeof buildApp>, email: string): Promise<string> {
@@ -783,8 +887,8 @@ async function login(app: ReturnType<typeof buildApp>, email: string): Promise<s
   return cookie;
 }
 
-function pdfUploadPayload() {
-  const content = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d]);
+function pdfUploadPayload(marker = "") {
+  const content = Buffer.from(`%PDF-${marker}`);
 
   return {
     originalFilename: "evidence.pdf",

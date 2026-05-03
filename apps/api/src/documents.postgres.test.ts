@@ -299,6 +299,9 @@ function createUuidStore(): AppStore {
     }
   ];
   store.documents = [];
+  store.documentVersions = [];
+  store.scanJobs = [];
+  store.storageObjects = {};
   store.auditEvents = [];
   store.sessions = [];
 
