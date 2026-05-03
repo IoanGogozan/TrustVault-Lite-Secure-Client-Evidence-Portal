@@ -5,6 +5,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'trustvault_app') THEN
     CREATE ROLE trustvault_app LOGIN PASSWORD 'trustvault_app_dev_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
   END IF;
+
+  ALTER ROLE trustvault_app WITH PASSWORD 'trustvault_app_dev_password';
 END $$;
 
 DO $$
@@ -246,4 +248,3 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   audit_events,
   support_access_requests
 TO trustvault_app;
-

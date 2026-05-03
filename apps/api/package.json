@@ -17,6 +17,7 @@
     "@trustvault/audit": "workspace:*",
     "@trustvault/authz": "workspace:*",
     "@trustvault/config": "workspace:*",
+    "@trustvault/database": "workspace:*",
     "fastify": "^5.6.0"
   },
   "devDependencies": {

@@ -5,7 +5,8 @@ import {
   createSession,
   requireAuth,
   requireTenantContext,
-  revokeSession
+  revokeSession,
+  type TenantRequestContext
 } from "./auth.js";
 import {
   createDemoStore,
@@ -16,14 +17,21 @@ import {
 } from "./domain.js";
 import { clearSessionCookie, setSessionCookie } from "./http.js";
 import { requirePermission } from "./authorization.js";
+import {
+  InMemoryDocumentRepository,
+  type DocumentReadScope,
+  type DocumentRepository
+} from "./documents.js";
 
 export type BuildAppOptions = {
   store?: AppStore;
+  documentRepository?: DocumentRepository;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const config = readBaseConfig();
   const store = options.store ?? createDemoStore();
+  const documentRepository = options.documentRepository ?? new InMemoryDocumentRepository(store);
   const app = Fastify({
     logger: config.env === "production"
   });
@@ -398,19 +406,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
 
     return {
-      documents: store.documents
-        .filter(
-          (document) =>
-            document.tenantId === request.tenantContext?.tenant.id && !document.deletedAt
-        )
-        .filter((document) =>
-          request.tenantContext?.membership.role === "owner" ||
-          request.tenantContext?.membership.role === "admin" ||
-          request.tenantContext?.membership.role === "auditor"
-            ? true
-            : request.tenantContext?.membership.projectIds?.includes(document.projectId)
-        )
-        .map(toDocumentResponse)
+      documents: (await documentRepository.list(toDocumentReadScope(request.tenantContext))).map(
+        toDocumentResponse
+      )
     };
   });
 
@@ -462,19 +460,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       return;
     }
 
-    const document = {
-      id: `document_${randomUUID()}`,
+    const document = await documentRepository.create({
       tenantId: request.tenantContext.tenant.id,
       projectId: project.id,
       title,
       classification,
-      storageKey: `${request.tenantContext.tenant.id}/documents/${randomUUID()}`,
-      currentVersionId: `version_${randomUUID()}`,
-      createdBy: request.tenantContext.user.id,
-      createdAt: new Date()
-    };
-
-    store.documents.push(document);
+      createdBy: request.tenantContext.user.id
+    });
 
     return reply.code(201).send({ document: toDocumentResponse(document) });
   });
@@ -486,9 +478,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       return;
     }
 
-    const document = store.documents.find(
-      (candidate) => candidate.id === request.params.documentId && !candidate.deletedAt
-    );
+    const document =
+      (await documentRepository.findByIdForAuthorization?.(request.params.documentId)) ??
+      (await documentRepository.findVisibleById(
+      toDocumentReadScope(request.tenantContext),
+      request.params.documentId
+      ));
 
     if (!document) {
       return reply.code(404).send({ error: "document_not_found" });
@@ -518,9 +513,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         return;
       }
 
-      const document = store.documents.find(
-        (candidate) => candidate.id === request.params.documentId && !candidate.deletedAt
-      );
+      const document =
+        (await documentRepository.findByIdForAuthorization?.(request.params.documentId)) ??
+        (await documentRepository.findVisibleById(
+        toDocumentReadScope(request.tenantContext),
+        request.params.documentId
+        ));
 
       if (!document) {
         return reply.code(404).send({ error: "document_not_found" });
@@ -538,7 +536,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         return;
       }
 
-      document.deletedAt = new Date();
+      await documentRepository.softDelete(
+        toDocumentReadScope(request.tenantContext),
+        request.params.documentId
+      );
 
       return reply.code(204).send();
     }
@@ -656,6 +657,14 @@ function toDocumentResponse(document: {
     classification: document.classification,
     createdBy: document.createdBy,
     createdAt: document.createdAt.toISOString()
+  };
+}
+
+function toDocumentReadScope(context: TenantRequestContext): DocumentReadScope {
+  return {
+    tenantId: context.tenant.id,
+    role: context.membership.role,
+    ...(context.membership.projectIds ? { projectIds: context.membership.projectIds } : {})
   };
 }
 

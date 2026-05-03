@@ -81,12 +81,21 @@ trustvault-lite/
 ```bash
 pnpm install
 pnpm db:up
+pnpm db:migrate
 pnpm dev:api
 pnpm dev:web
 ```
 
 The local PostgreSQL service is defined in `infra/docker/docker-compose.yml`.
 The initial RLS migration is in `infra/migrations/0001_initial_rls.sql`.
+
+Database-backed integration tests are opt-in:
+
+```bash
+pnpm db:up
+pnpm db:migrate
+pnpm test:db
+```
 
 ## Security Controls Matrix
 

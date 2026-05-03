@@ -4,9 +4,12 @@ import { setTenantContext, withTenantContext, type SqlExecutor } from "./index.j
 class RecordingExecutor implements SqlExecutor {
   public readonly calls: Array<{ sql: string; parameters?: readonly unknown[] }> = [];
 
-  async execute(sql: string, parameters?: readonly unknown[]): Promise<unknown> {
+  async execute(sql: string, parameters?: readonly unknown[]) {
     this.calls.push(parameters ? { sql, parameters } : { sql });
-    return undefined;
+    return {
+      rows: [],
+      rowCount: 0
+    };
   }
 }
 

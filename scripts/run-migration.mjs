@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const databaseUrl =
   process.env.MIGRATION_DATABASE_URL ??
-  "postgres://trustvault:trustvault_dev_password@localhost:5432/trustvault";
+  "postgres://trustvault:trustvault_dev_password@localhost:55432/trustvault";
 const migrationPath = resolve("infra/migrations/0001_initial_rls.sql");
 
 if (!existsSync(migrationPath)) {
