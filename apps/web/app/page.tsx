@@ -10,11 +10,11 @@ import {
   ShieldCheck,
   UserRound
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
-type Role = "Owner" | "Admin" | "Member" | "Viewer" | "Auditor";
+type Role = "owner" | "admin" | "member" | "viewer" | "auditor";
 
-type DemoMembership = {
+type Membership = {
   tenantId: string;
   tenantName: string;
   tenantSlug: string;
@@ -22,27 +22,10 @@ type DemoMembership = {
   mfaRequired: boolean;
 };
 
-const demoMemberships: [DemoMembership, ...DemoMembership[]] = [
-  {
-    tenantId: "tenant_acme",
-    tenantName: "Acme Corp",
-    tenantSlug: "acme",
-    role: "Owner",
-    mfaRequired: true
-  },
-  {
-    tenantId: "tenant_globex",
-    tenantName: "Globex Review",
-    tenantSlug: "globex-review",
-    role: "Auditor",
-    mfaRequired: true
-  }
-];
-
-const demoUser = {
-  name: "Acme Owner",
-  email: "owner@acme.test",
-  memberships: demoMemberships
+type CurrentUser = {
+  name: string;
+  email: string;
+  memberships: Membership[];
 };
 
 const securitySignals = [
@@ -68,21 +51,99 @@ const securitySignals = [
   }
 ];
 
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
 export default function Home() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState(demoUser.memberships[0].tenantId);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | undefined>();
+  const [selectedTenantId, setSelectedTenantId] = useState<string | undefined>();
+  const [loginEmail, setLoginEmail] = useState("owner@acme.test");
+  const [tenantName, setTenantName] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string | undefined>();
 
   const selectedMembership = useMemo(
     () =>
-      demoUser.memberships.find((membership) => membership.tenantId === selectedTenantId) ??
-      demoUser.memberships[0],
-    [selectedTenantId]
+      currentUser?.memberships.find((membership) => membership.tenantId === selectedTenantId) ??
+      currentUser?.memberships[0],
+    [currentUser?.memberships, selectedTenantId]
   );
 
-  if (!isLoggedIn) {
+  async function refreshCurrentUser() {
+    const response = await fetch(`${apiBaseUrl}/me`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      setCurrentUser(undefined);
+      setSelectedTenantId(undefined);
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      user: Omit<CurrentUser, "memberships">;
+      memberships: Membership[];
+    };
+    const nextUser = {
+      ...payload.user,
+      memberships: payload.memberships
+    };
+
+    setCurrentUser(nextUser);
+    setSelectedTenantId((currentTenantId) => currentTenantId ?? nextUser.memberships[0]?.tenantId);
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatusMessage(undefined);
+
+    const response = await fetch(`${apiBaseUrl}/auth/dev-login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: loginEmail })
+    });
+
+    if (!response.ok) {
+      setStatusMessage("Login failed");
+      return;
+    }
+
+    await refreshCurrentUser();
+  }
+
+  async function handleLogout() {
+    await fetch(`${apiBaseUrl}/auth/logout`, {
+      method: "POST",
+      credentials: "include"
+    });
+    setCurrentUser(undefined);
+    setSelectedTenantId(undefined);
+  }
+
+  async function handleCreateTenant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatusMessage(undefined);
+
+    const response = await fetch(`${apiBaseUrl}/tenants`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tenantName })
+    });
+
+    if (!response.ok) {
+      setStatusMessage("Organization could not be created");
+      return;
+    }
+
+    setTenantName("");
+    await refreshCurrentUser();
+    setStatusMessage("Organization created");
+  }
+
+  if (!currentUser) {
     return (
       <main className="login-shell">
-        <section className="login-panel" aria-label="Demo login">
+        <form className="login-panel" aria-label="Demo login" onSubmit={handleLogin}>
           <div className="brand-mark">
             <ShieldCheck aria-hidden="true" />
           </div>
@@ -90,9 +151,39 @@ export default function Home() {
             <h1>TrustVault Lite</h1>
             <p>Secure client evidence portal</p>
           </div>
-          <button className="primary-action" type="button" onClick={() => setIsLoggedIn(true)}>
+          <label className="field">
+            <span>Email</span>
+            <input
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+              type="email"
+              autoComplete="email"
+            />
+          </label>
+          {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
+          <button className="primary-action" type="submit">
             <KeyRound aria-hidden="true" />
             Demo login
+          </button>
+        </form>
+      </main>
+    );
+  }
+
+  if (!selectedMembership) {
+    return (
+      <main className="login-shell">
+        <section className="login-panel" aria-label="No tenant access">
+          <div className="brand-mark">
+            <ShieldCheck aria-hidden="true" />
+          </div>
+          <div>
+            <h1>No active tenant</h1>
+            <p>Create an organization or accept an invitation to continue.</p>
+          </div>
+          <button className="primary-action" type="button" onClick={handleLogout}>
+            <LogOut aria-hidden="true" />
+            Log out
           </button>
         </section>
       </main>
@@ -115,9 +206,9 @@ export default function Home() {
             <UserRound aria-hidden="true" />
             Members
           </a>
-          <a className="nav-item" href="#keys">
-            <KeyRound aria-hidden="true" />
-            API Keys
+          <a className="nav-item" href="#organization">
+            <Building2 aria-hidden="true" />
+            Organization
           </a>
         </nav>
       </aside>
@@ -132,17 +223,17 @@ export default function Home() {
             <label>
               <span>Tenant</span>
               <select
-                value={selectedTenantId}
+                value={selectedMembership.tenantId}
                 onChange={(event) => setSelectedTenantId(event.target.value)}
               >
-                {demoUser.memberships.map((membership) => (
+                {currentUser.memberships.map((membership) => (
                   <option key={membership.tenantId} value={membership.tenantId}>
                     {membership.tenantName}
                   </option>
                 ))}
               </select>
             </label>
-            <button className="icon-action" type="button" onClick={() => setIsLoggedIn(false)}>
+            <button className="icon-action" type="button" onClick={handleLogout}>
               <LogOut aria-hidden="true" />
               <span className="sr-only">Log out</span>
             </button>
@@ -174,15 +265,15 @@ export default function Home() {
             <dl className="details">
               <div>
                 <dt>User</dt>
-                <dd>{demoUser.name}</dd>
+                <dd>{currentUser.name}</dd>
               </div>
               <div>
                 <dt>Email</dt>
-                <dd>{demoUser.email}</dd>
+                <dd>{currentUser.email}</dd>
               </div>
               <div>
                 <dt>Role</dt>
-                <dd>{selectedMembership.role}</dd>
+                <dd>{formatRole(selectedMembership.role)}</dd>
               </div>
               <div>
                 <dt>Tenant slug</dt>
@@ -202,8 +293,36 @@ export default function Home() {
               <li>MFA requirement is visible per tenant membership.</li>
             </ul>
           </article>
+
+          <article className="panel" id="organization">
+            <div className="panel-heading">
+              <h2>Create organization</h2>
+              <Building2 aria-hidden="true" />
+            </div>
+            <form className="stack-form" onSubmit={handleCreateTenant}>
+              <label className="field">
+                <span>Organization name</span>
+                <input
+                  value={tenantName}
+                  onChange={(event) => setTenantName(event.target.value)}
+                  placeholder="Northwind Security"
+                />
+              </label>
+              <button className="secondary-action" type="submit">
+                Create
+              </button>
+              {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
+            </form>
+          </article>
         </section>
       </section>
     </main>
   );
+}
+
+function formatRole(role: Role): string {
+  return role
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

@@ -31,6 +31,39 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(cookie).toContain("SameSite=Lax");
   });
 
+  it("allows credentialed CORS only for the web origin", async () => {
+    const app = buildApp({ store: createDemoStore() });
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/me",
+      headers: {
+        origin: "http://localhost:3000",
+        "access-control-request-method": "GET"
+      }
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("rejects preflight requests from unknown origins", async () => {
+    const app = buildApp({ store: createDemoStore() });
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/me",
+      headers: {
+        origin: "https://evil.example",
+        "access-control-request-method": "GET"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "origin_not_allowed" });
+  });
+
   it("lists only active tenant memberships for the current user", async () => {
     const store = createDemoStore();
     const app = buildApp({ store });

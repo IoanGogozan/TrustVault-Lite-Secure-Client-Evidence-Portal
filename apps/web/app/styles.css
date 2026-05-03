@@ -25,7 +25,8 @@ body {
 }
 
 button,
-select {
+select,
+input {
   font: inherit;
 }
 
@@ -71,6 +72,7 @@ select {
 }
 
 .primary-action,
+.secondary-action,
 .icon-action {
   display: inline-flex;
   align-items: center;
@@ -90,6 +92,16 @@ select {
 
 .primary-action:hover {
   background: var(--accent-strong);
+}
+
+.secondary-action {
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--accent-strong);
+  background: var(--surface-muted);
+  border: 1px solid #b8ccc5;
+  border-radius: 6px;
+  font-weight: 700;
 }
 
 .app-shell {
@@ -163,13 +175,25 @@ select {
   gap: 6px;
 }
 
-.topbar select {
+.topbar select,
+.field input {
   min-width: 190px;
   height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   padding: 0 10px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .icon-action {
@@ -192,7 +216,7 @@ select {
 }
 
 .content-grid {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .metric,
@@ -258,6 +282,18 @@ select {
   line-height: 1.6;
 }
 
+.stack-form {
+  display: grid;
+  gap: 12px;
+}
+
+.status-message {
+  margin: 0;
+  color: var(--warning);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -305,4 +341,3 @@ select {
     width: 100%;
   }
 }
-

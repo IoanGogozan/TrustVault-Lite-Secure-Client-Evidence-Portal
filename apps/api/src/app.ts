@@ -26,6 +26,33 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     logger: config.env === "production"
   });
 
+  app.addHook("onRequest", async (request, reply) => {
+    const origin = request.headers.origin;
+
+    if (origin && isAllowedOrigin(origin)) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Access-Control-Allow-Credentials", "true");
+      reply.header("Vary", "Origin");
+    }
+  });
+
+  app.options("*", async (request, reply) => {
+    const origin = request.headers.origin;
+
+    if (!origin || !isAllowedOrigin(origin)) {
+      return reply.code(403).send({ error: "origin_not_allowed" });
+    }
+
+    return reply
+      .header("Access-Control-Allow-Origin", origin)
+      .header("Access-Control-Allow-Credentials", "true")
+      .header("Access-Control-Allow-Headers", "Content-Type, X-Tenant-Id")
+      .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      .header("Vary", "Origin")
+      .code(204)
+      .send();
+  });
+
   app.get("/health", async () => ({ status: "ok", app: config.appName }));
 
   app.post<{ Body: { email?: string } }>("/auth/dev-login", async (request, reply) => {
@@ -340,4 +367,8 @@ function findOrCreateInvitedUser(
   store.users.push(user);
 
   return user;
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  return origin === "http://localhost:3000" || origin === "http://127.0.0.1:3000";
 }
