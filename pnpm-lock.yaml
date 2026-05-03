@@ -98,6 +98,15 @@ importers:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@24.12.2)(tsx@4.21.0)
 
+  packages/database:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.4(@types/node@24.12.2)(tsx@4.21.0)
+
   packages/validation:
     devDependencies:
       typescript:

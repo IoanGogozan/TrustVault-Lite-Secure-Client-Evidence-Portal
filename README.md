@@ -76,6 +76,18 @@ trustvault-lite/
 4. Security dashboard: audit logs, API keys, sessions, MFA status, share links.
 5. DevSecOps: security pipeline and verifiable reports.
 
+## Local Development
+
+```bash
+pnpm install
+pnpm db:up
+pnpm dev:api
+pnpm dev:web
+```
+
+The local PostgreSQL service is defined in `infra/docker/docker-compose.yml`.
+The initial RLS migration is in `infra/migrations/0001_initial_rls.sql`.
+
 ## Security Controls Matrix
 
 | Area | Control | Implemented Through | Testable Through |
@@ -99,4 +111,3 @@ trustvault-lite/
 - Malware scanning may start with a documented mock and later move to ClamAV.
 - Billing is mocked.
 - The identity provider may run locally for demo purposes, but the integration should follow OIDC Authorization Code Flow.
-
