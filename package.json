@@ -1,0 +1,20 @@
+{
+  "name": "trustvault-lite",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ASVS-inspired secure SaaS demo focused on tenant isolation, authorization, secure file handling and auditability.",
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
+
