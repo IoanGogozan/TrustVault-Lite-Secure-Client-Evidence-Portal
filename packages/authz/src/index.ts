@@ -65,6 +65,7 @@ export const permissionsByRole: Record<Role, readonly Permission[]> = {
   ],
   admin: [
     "members:invite",
+    "members:update_role",
     "documents:*",
     "audit:read",
     "api_keys:read",
@@ -150,4 +151,3 @@ function hasProjectAccess(actor: Actor, projectId: string): boolean {
 function deny(reason: string): AuthorizationDecision {
   return { allowed: false, reason };
 }
-

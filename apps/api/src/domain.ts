@@ -109,6 +109,14 @@ export function createDemoStore(): AppStore {
         createdAt: now
       },
       {
+        id: "user_admin_acme",
+        email: "admin@acme.test",
+        name: "Acme Admin",
+        identityProviderSubject: "oidc|acme-admin",
+        status: "active",
+        createdAt: now
+      },
+      {
         id: "user_member_acme",
         email: "member@acme.test",
         name: "Acme Member",
@@ -121,6 +129,14 @@ export function createDemoStore(): AppStore {
         email: "auditor@acme.test",
         name: "Acme Auditor",
         identityProviderSubject: "oidc|acme-auditor",
+        status: "active",
+        createdAt: now
+      },
+      {
+        id: "user_owner_globex",
+        email: "owner@globex.test",
+        name: "Globex Owner",
+        identityProviderSubject: "oidc|globex-owner",
         status: "active",
         createdAt: now
       }
@@ -162,6 +178,15 @@ export function createDemoStore(): AppStore {
         createdAt: now
       },
       {
+        id: "membership_acme_admin",
+        tenantId: "tenant_acme",
+        userId: "user_admin_acme",
+        role: "admin",
+        status: "active",
+        mfaRequired: true,
+        createdAt: now
+      },
+      {
         id: "membership_acme_member",
         tenantId: "tenant_acme",
         userId: "user_member_acme",
@@ -176,6 +201,15 @@ export function createDemoStore(): AppStore {
         tenantId: "tenant_acme",
         userId: "user_auditor_acme",
         role: "auditor",
+        status: "active",
+        mfaRequired: true,
+        createdAt: now
+      },
+      {
+        id: "membership_globex_owner",
+        tenantId: "tenant_globex",
+        userId: "user_owner_globex",
+        role: "owner",
         status: "active",
         mfaRequired: true,
         createdAt: now

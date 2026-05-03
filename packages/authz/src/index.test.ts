@@ -19,6 +19,7 @@ describe("roleAllows", () => {
   it("supports wildcard permissions only within the same area", () => {
     expect(roleAllows("owner", "documents:delete")).toBe(true);
     expect(roleAllows("owner", "api_keys:revoke")).toBe(true);
+    expect(roleAllows("admin", "members:update_role")).toBe(true);
     expect(roleAllows("viewer", "documents:read")).toBe(true);
     expect(roleAllows("viewer", "documents:create")).toBe(false);
   });
@@ -111,4 +112,3 @@ describe("requireAllowed", () => {
     ).toThrow(AuthorizationError);
   });
 });
-

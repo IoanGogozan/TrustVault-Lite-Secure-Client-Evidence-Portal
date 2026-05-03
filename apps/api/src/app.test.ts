@@ -326,6 +326,138 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(response.json()).toEqual({ error: "invite_not_found" });
   });
 
+  it("allows owners to update member roles", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "owner@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_acme_member/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "viewer" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      membership: {
+        id: "membership_acme_member",
+        tenantId: "tenant_acme",
+        userId: "user_member_acme",
+        role: "viewer",
+        status: "active"
+      }
+    });
+    expect(
+      store.memberships.find((membership) => membership.id === "membership_acme_member")?.role
+    ).toBe("viewer");
+  });
+
+  it("allows admins to update non-owner member roles", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "admin@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_acme_viewer/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "member" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      store.memberships.find((membership) => membership.id === "membership_acme_viewer")?.role
+    ).toBe("member");
+  });
+
+  it("prevents admins from modifying owners", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "admin@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_acme_owner/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "viewer" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "permission_denied" });
+    expect(
+      store.memberships.find((membership) => membership.id === "membership_acme_owner")?.role
+    ).toBe("owner");
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "authorization.denied",
+      entityType: "membership",
+      entityId: "membership_acme_owner",
+      metadata: expect.objectContaining({
+        requestedAction: "members:update_role",
+        reason: "owner_role_protected"
+      })
+    });
+  });
+
+  it("prevents admins from assigning owner role", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "admin@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_acme_member/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "owner" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "permission_denied" });
+    expect(
+      store.memberships.find((membership) => membership.id === "membership_acme_member")?.role
+    ).toBe("member");
+  });
+
+  it("denies role updates for members", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const cookie = await login(app, "member@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_acme_viewer/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "member" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "permission_denied" });
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "authorization.denied",
+      entityType: "membership",
+      entityId: "membership_acme_viewer",
+      metadata: expect.objectContaining({
+        requestedAction: "members:update_role",
+        reason: "permission_missing"
+      })
+    });
+  });
+
+  it("does not expose foreign tenant memberships through role update", async () => {
+    const app = buildApp({ store: createDemoStore() });
+    const cookie = await login(app, "owner@acme.test");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/memberships/membership_globex_owner/role",
+      headers: { cookie, "x-tenant-id": "tenant_acme" },
+      payload: { role: "viewer" }
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "membership_not_found" });
+  });
+
   it("filters document responses and does not expose storage internals", async () => {
     const app = buildApp({ store: createDemoStore() });
     const cookie = await login(app, "viewer@acme.test");

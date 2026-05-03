@@ -194,6 +194,73 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     };
   });
 
+  app.patch<{
+    Params: { membershipId: string };
+    Body: { role?: MembershipRole };
+  }>("/memberships/:membershipId/role", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const targetMembership = store.memberships.find(
+      (membership) =>
+        membership.id === request.params.membershipId &&
+        membership.tenantId === request.tenantContext?.tenant.id &&
+        membership.status === "active"
+    );
+
+    if (!targetMembership) {
+      return reply.code(404).send({ error: "membership_not_found" });
+    }
+
+    const nextRole = request.body.role;
+
+    if (!nextRole || !isAssignableRole(nextRole)) {
+      return reply.code(400).send({ error: "invalid_role" });
+    }
+
+    const allowed = await requirePermission(store, request, reply, "members:update_role", {
+      tenantId: request.tenantContext.tenant.id,
+      entityType: "membership",
+      entityId: targetMembership.id
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    const roleChangeDecision = canChangeMembershipRole(
+      request.tenantContext.membership.role,
+      targetMembership.role,
+      nextRole
+    );
+
+    if (!roleChangeDecision.allowed) {
+      await denyMembershipRoleChange(
+        store,
+        request,
+        reply,
+        targetMembership.id,
+        roleChangeDecision.reason
+      );
+      return;
+    }
+
+    targetMembership.role = nextRole;
+
+    return {
+      membership: {
+        id: targetMembership.id,
+        tenantId: targetMembership.tenantId,
+        userId: targetMembership.userId,
+        role: targetMembership.role,
+        status: targetMembership.status
+      }
+    };
+  });
+
   app.post<{
     Body: { email?: string; role?: MembershipRole };
   }>("/tenant/invitations", async (request, reply) => {
@@ -504,6 +571,63 @@ function normalizeSlug(value: string): string | undefined {
 
 function isInvitableRole(role: string): role is MembershipRole {
   return role === "admin" || role === "member" || role === "viewer" || role === "auditor";
+}
+
+function isAssignableRole(role: string): role is MembershipRole {
+  return role === "owner" || role === "admin" || role === "member" || role === "viewer" || role === "auditor";
+}
+
+function canChangeMembershipRole(
+  actorRole: MembershipRole,
+  targetRole: MembershipRole,
+  nextRole: MembershipRole
+): { allowed: true } | { allowed: false; reason: string } {
+  if (actorRole !== "owner" && actorRole !== "admin") {
+    return { allowed: false, reason: "permission_missing" };
+  }
+
+  if (actorRole === "admin" && (targetRole === "owner" || nextRole === "owner")) {
+    return { allowed: false, reason: "owner_role_protected" };
+  }
+
+  if (actorRole !== "owner" && targetRole === "owner") {
+    return { allowed: false, reason: "owner_role_protected" };
+  }
+
+  return { allowed: true };
+}
+
+async function denyMembershipRoleChange(
+  store: AppStore,
+  request: Parameters<typeof requirePermission>[1],
+  reply: Parameters<typeof requirePermission>[2],
+  membershipId: string,
+  reason: string
+): Promise<void> {
+  if (!request.tenantContext) {
+    await reply.code(500).send({ error: "tenant_context_required" });
+    return;
+  }
+
+  store.auditEvents.push({
+    id: `audit_${randomUUID()}`,
+    tenantId: request.tenantContext.tenant.id,
+    actorUserId: request.tenantContext.user.id,
+    actorType: "user",
+    action: "authorization.denied",
+    entityType: "membership",
+    entityId: membershipId,
+    result: "failure",
+    ipHash: hashSecret(request.ip),
+    userAgent: request.headers["user-agent"] ?? "unknown",
+    metadata: {
+      requestedAction: "members:update_role",
+      reason
+    },
+    createdAt: new Date()
+  });
+
+  await reply.code(403).send({ error: "permission_denied" });
 }
 
 function isDocumentClassification(value: string): value is DocumentClassification {
