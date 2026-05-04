@@ -6,6 +6,8 @@ TrustVault Lite is a B2B multi-tenant SaaS made of a frontend, API, worker, Post
 
 ## Component Diagram
 
+![TrustVault Lite security architecture](../assets/trustvault-security-architecture.svg)
+
 ```mermaid
 flowchart LR
   Browser[Browser] --> Web[Next.js Web]
@@ -114,4 +116,3 @@ Minimum headers:
 - `X-Frame-Options: DENY`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Permissions-Policy`
-

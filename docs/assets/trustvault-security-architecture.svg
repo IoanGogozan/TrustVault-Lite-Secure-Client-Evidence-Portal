@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="768" viewBox="0 0 2048 768" role="img" aria-labelledby="title desc">
+  <title id="title">TrustVault Lite security architecture</title>
+  <desc id="desc">Architecture diagram showing browser, Next.js web app, OIDC identity, secure API, authorization, PostgreSQL RLS, Redis, scan worker, ClamAV, object storage, audit events, and structured logs.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#d6d6d6" />
+    </marker>
+    <style>
+      .bg { fill: #050505; }
+      .box { fill: #202020; stroke: #d6d6d6; stroke-width: 2; }
+      .cylinder { fill: #202020; stroke: #d6d6d6; stroke-width: 2; }
+      .label { fill: #d6d6d6; font: 24px Arial, Helvetica, sans-serif; font-weight: 600; }
+      .arrow { fill: none; stroke: #d6d6d6; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="2048" height="768" />
+
+  <rect class="box" x="12" y="300" width="172" height="72" />
+  <text class="label" x="55" y="345">Browser</text>
+
+  <rect class="box" x="255" y="300" width="324" height="72" />
+  <text class="label" x="299" y="345">Next.js BFF / Web App</text>
+
+  <rect class="box" x="650" y="230" width="318" height="72" />
+  <text class="label" x="695" y="275">OIDC / MFA / Passkeys</text>
+
+  <rect class="box" x="710" y="374" width="198" height="72" />
+  <text class="label" x="755" y="419">Secure API</text>
+
+  <rect class="box" x="1062" y="30" width="296" height="72" />
+  <text class="label" x="1108" y="75">Authorization Layer</text>
+
+  <path class="cylinder" d="M1482 30 C1482 6 1682 6 1682 30 L1682 88 C1682 112 1482 112 1482 88 Z" />
+  <ellipse class="cylinder" cx="1582" cy="30" rx="100" ry="24" />
+  <text class="label" x="1494" y="88">PostgreSQL + RLS</text>
+
+  <path class="cylinder" d="M1068 206 C1068 182 1354 182 1354 206 L1354 260 C1354 284 1068 284 1068 260 Z" />
+  <ellipse class="cylinder" cx="1211" cy="206" rx="143" ry="24" />
+  <text class="label" x="1080" y="254">Redis Rate Limit / Queue</text>
+
+  <rect class="box" x="1450" y="196" width="264" height="72" />
+  <text class="label" x="1494" y="241">File Scan Worker</text>
+
+  <rect class="box" x="1785" y="196" width="260" height="72" />
+  <text class="label" x="1830" y="241">ClamAV / Scanner</text>
+
+  <path class="cylinder" d="M1145 384 C1145 366 1276 366 1276 384 L1276 438 C1276 456 1145 456 1145 438 Z" />
+  <ellipse class="cylinder" cx="1210.5" cy="384" rx="65.5" ry="18" />
+  <text class="label" x="1162" y="427">S3 / MinIO</text>
+
+  <path class="cylinder" d="M1134 552 C1134 532 1288 532 1288 552 L1288 608 C1288 628 1134 628 1134 608 Z" />
+  <ellipse class="cylinder" cx="1211" cy="552" rx="77" ry="20" />
+  <text class="label" x="1146" y="600">Audit Events</text>
+
+  <rect class="box" x="1040" y="700" width="336" height="72" />
+  <text class="label" x="1085" y="745">Structured Logs / Alerts</text>
+
+  <path class="arrow" d="M184 336 H255" />
+  <path class="arrow" d="M579 333 C615 318 632 304 650 267" />
+  <path class="arrow" d="M579 373 C630 404 668 410 710 410" />
+  <path class="arrow" d="M908 374 C944 336 974 302 1068 232" />
+  <path class="arrow" d="M968 266 C1010 178 1032 86 1062 66" />
+  <path class="arrow" d="M1358 66 H1482" />
+  <path class="arrow" d="M968 266 C1012 232 1036 226 1068 226" />
+  <path class="arrow" d="M1354 232 H1450" />
+  <path class="arrow" d="M1714 232 H1785" />
+  <path class="arrow" d="M908 410 H1145" />
+  <path class="arrow" d="M908 431 C970 502 1034 574 1134 580" />
+  <path class="arrow" d="M830 446 C900 566 950 700 1040 736" />
+  <path class="arrow" d="M809 302 L780 374" />
+  <path class="arrow" d="M865 302 L819 374" />
+</svg>

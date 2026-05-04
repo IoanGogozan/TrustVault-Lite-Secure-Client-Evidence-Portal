@@ -239,7 +239,7 @@ Remaining hardening:
 
 ## Phase 8: Frontend/Backend Hardening
 
-Status: partially implemented for the current demo scope.
+Status: implemented for the current demo scope.
 
 Completed:
 
@@ -268,20 +268,34 @@ Remaining hardening:
 
 ## Phase 9: CI/CD Security
 
-Pipeline:
+Status: implemented for the current demo scope.
 
-1. install
-2. lint
-3. unit tests
-4. integration tests
-5. authorization tests
-6. dependency scan
-7. secret scan
-8. SAST
-9. container scan
-10. build
-11. OWASP ZAP baseline
-12. generate security report artifact
+Completed:
+
+- Install dependencies.
+- Run lint checks.
+- Run unit tests.
+- Run integration tests.
+- Run database-backed PostgreSQL RLS tests.
+- Run authorization tests.
+- Run dependency scan.
+- Run secret scan.
+- Run SAST.
+- Run filesystem and container-style scan.
+- Build the application.
+- Run OWASP ZAP baseline.
+- Generate security report artifact.
+- Configure Dependabot for npm and GitHub Actions updates.
+
+Implementation note:
+
+- Details are documented in `docs/implementation/phase-9-devsecops.md`.
+
+Remaining hardening:
+
+- Add a dedicated Docker image build once production container files exist.
+- Add SBOM generation for release artifacts.
+- Promote ZAP findings from non-blocking to blocking after a stable baseline file is created.
 
 ## Phase 10: Portfolio Polish
 

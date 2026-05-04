@@ -44,6 +44,10 @@ TrustVault Lite is inspired by:
 - [Incident response](docs/security/incident-response.md)
 - [Secure SDLC](docs/security/secure-sdlc.md)
 
+## Architecture Diagram
+
+![TrustVault Lite security architecture](docs/assets/trustvault-security-architecture.svg)
+
 ## Proposed Repository Structure
 
 ```text

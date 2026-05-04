@@ -1,0 +1,8 @@
+title = "TrustVault Lite Gitleaks configuration"
+
+[allowlist]
+description = "Allow documented local-only demo credentials."
+regexes = [
+  '''trustvault_dev_password''',
+  '''trustvault_app_dev_password'''
+]

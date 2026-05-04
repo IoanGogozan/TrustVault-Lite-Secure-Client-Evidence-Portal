@@ -28,20 +28,28 @@ Security must be part of the development process, not a final check added after 
 
 ## CI/CD Security Pipeline
 
-Target pipeline:
+Implemented pipeline:
 
-1. install
-2. lint
-3. unit tests
-4. integration tests
-5. authorization tests
-6. dependency scan
-7. secret scan
-8. SAST
-9. container scan
-10. build
-11. OWASP ZAP baseline
-12. generate security report artifact
+1. install dependencies
+2. lint checks
+3. type checks
+4. unit tests
+5. integration tests
+6. PostgreSQL-backed RLS tests
+7. authorization tests
+8. dependency scan
+9. secret scan
+10. CodeQL SAST
+11. Trivy filesystem and container-style scan
+12. build
+13. OWASP ZAP baseline
+14. security report artifact
+
+Workflow files:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/security.yml`
+- `.github/dependabot.yml`
 
 ## Release Hardening
 
@@ -51,4 +59,3 @@ Target pipeline:
 - Run demo seed and the main scenario.
 - Run cross-tenant tests.
 - Review the risk register.
-
