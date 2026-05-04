@@ -160,9 +160,9 @@ Completed:
 - Show the project, document, upload, scan, download, and audit flow in the web UI.
 - Provide a minimal audit viewer for generated lifecycle events.
 
-Current worker note:
+Implementation note:
 
-- Phase 4 starts with a documented mock scan worker in `docs/implementation/phase-4-scan-worker.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 - The mock queue can be replaced with Redis and BullMQ without changing the document upload boundary.
 
 ## Phase 5: Share Links
@@ -180,7 +180,7 @@ Completed:
 
 Implementation note:
 
-- Details are documented in `docs/implementation/phase-5-share-links.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 
 ## Phase 6: API Keys and External API
 
@@ -201,7 +201,7 @@ Completed:
 
 Implementation note:
 
-- Details are documented in `docs/implementation/phase-6-api-keys.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 
 Remaining hardening:
 
@@ -229,7 +229,7 @@ Completed:
 
 Implementation note:
 
-- Details are documented in `docs/implementation/phase-7-audit-security-dashboard.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 
 Remaining hardening:
 
@@ -259,7 +259,7 @@ Completed:
 
 Implementation note:
 
-- Details are documented in `docs/implementation/phase-8-hardening.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 
 Remaining hardening:
 
@@ -289,7 +289,7 @@ Completed:
 
 Implementation note:
 
-- Details are documented in `docs/implementation/phase-9-devsecops.md`.
+- Implemented controls are summarized in `docs/implementation/implemented-controls.md`.
 
 Remaining hardening:
 

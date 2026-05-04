@@ -24,8 +24,9 @@ TrustVault Lite is designed as a secure SaaS demo with visible and testable cont
 
 ## Main Controls
 
-- OIDC Authorization Code Flow.
-- MFA/passkeys through identity provider.
+- Development-only demo login for local portfolio flows.
+- Production identity target: OIDC Authorization Code Flow.
+- Production MFA/passkeys through identity provider.
 - HttpOnly Secure SameSite cookies.
 - Centralized RBAC/ABAC.
 - PostgreSQL RLS.
@@ -38,4 +39,3 @@ TrustVault Lite is designed as a secure SaaS demo with visible and testable cont
 - Security headers.
 - CSRF protection.
 - CI/CD security scans.
-

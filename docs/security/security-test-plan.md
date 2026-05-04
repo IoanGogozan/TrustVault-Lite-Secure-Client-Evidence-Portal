@@ -56,5 +56,4 @@
 - SAST.
 - container scan.
 - OWASP ZAP baseline.
-- SBOM generation.
-
+- SBOM generation for future release artifacts.

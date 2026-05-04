@@ -35,7 +35,7 @@ TrustVault Lite is inspired by:
 - [Demo accounts](docs/product/demo-accounts.md)
 - [Portfolio assets](docs/product/portfolio-assets.md)
 - [Implementation plan](docs/implementation/implementation-plan.md)
-- [Backlog](docs/implementation/backlog.md)
+- [Implemented controls](docs/implementation/implemented-controls.md)
 - [Definition of done](docs/implementation/definition-of-done.md)
 - [Security overview](docs/security/README.md)
 - [Threat model](docs/security/threat-model.md)
