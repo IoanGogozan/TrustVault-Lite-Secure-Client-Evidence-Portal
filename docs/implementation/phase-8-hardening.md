@@ -20,7 +20,10 @@ Phase 8 adds baseline browser, request, and session safety controls for the demo
 - Error responses use stable error codes and do not expose stack traces.
 - The web client sends CSRF tokens for mutating session-backed requests.
 - In-memory demo rate limits protect login, API keys, external API calls, share links, and uploads.
+- A Redis-compatible rate limiter adapter is available for multi-instance deployments.
 - Audit event filters validate actor and result values before querying.
+- A central request shape validator rejects unknown body and query keys on existing endpoints.
+- Production API logging uses structured redaction for authorization headers, cookies, CSRF tokens, API keys, tokens, passwords, and file payloads.
 - Frontend responses define CSP and baseline browser security headers through Next.js config.
 
 ## Security Notes
@@ -34,10 +37,10 @@ Phase 8 adds baseline browser, request, and session safety controls for the demo
 
 - Tests cover security headers, CORS allowed headers, CSRF rejection and acceptance, request body limits, and no stack trace leakage.
 - Tests cover login rate limiting and invalid audit filter rejection.
+- Tests cover unknown mass-assignment fields and the Redis-compatible limiter contract.
 - Existing authorization, tenant isolation, file, share-link, API key, and dashboard tests continue to pass.
 
 ## Remaining Hardening
 
-- Move rate limits to Redis for multi-instance deployments.
-- Add structured request logging with redaction.
-- Expand schema validation for all request bodies and query strings.
+- Wire the Redis-compatible rate limiter to a real Redis client in deployed environments.
+- Move request shape rules into a reusable schema library when the API surface grows.

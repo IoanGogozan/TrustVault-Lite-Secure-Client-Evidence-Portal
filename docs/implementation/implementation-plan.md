@@ -250,8 +250,11 @@ Completed:
 - Add stable error responses without stack traces.
 - Send CSRF tokens from the web client for mutating session-backed requests.
 - Add demo rate limits for login, API keys, external API, share links, and uploads.
+- Add a Redis-compatible rate limiter adapter for multi-instance deployments.
 - Add frontend CSP and browser security headers through Next.js config.
 - Validate audit query filters.
+- Reject unknown body and query keys through centralized request shape validation.
+- Add structured production logging redaction for sensitive headers and payload fields.
 - Keep existing output filtering for sensitive document, share-link, and API key fields.
 
 Implementation note:
@@ -260,9 +263,8 @@ Implementation note:
 
 Remaining hardening:
 
-- Replace in-memory rate limits with Redis-backed limits.
-- Expand schema validation across all request and query inputs.
-- Add structured logs with redaction.
+- Wire the Redis-compatible rate limiter to a real Redis client in deployment.
+- Move request shape validation into reusable route schemas as the API grows.
 
 ## Phase 9: CI/CD Security
 

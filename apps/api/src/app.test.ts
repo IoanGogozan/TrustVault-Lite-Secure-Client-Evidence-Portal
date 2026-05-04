@@ -730,7 +730,7 @@ describe("phase 1 auth and tenant foundation", () => {
     });
   });
 
-  it("allows members to create documents but ignores tenant mass assignment", async () => {
+  it("rejects document mass assignment fields", async () => {
     const store = createDemoStore();
     const app = buildApp({ store });
     const cookie = await login(app, "member@acme.test");
@@ -748,23 +748,11 @@ describe("phase 1 auth and tenant foundation", () => {
       }
     });
 
-    expect(response.statusCode).toBe(201);
-    expect(response.json().document).toMatchObject({
-      tenantId: "tenant_acme",
-      title: "Evidence Upload",
-      projectId: "project_acme_soc2"
-    });
-    expect(response.json().document).not.toHaveProperty("storageKey");
-    expect(store.auditEvents.at(-1)).toMatchObject({
-      action: "document.created",
-      entityType: "document",
-      entityId: response.json().document.id,
-      result: "success",
-      metadata: expect.objectContaining({
-        projectId: "project_acme_soc2",
-        classification: "confidential"
-      })
-    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request_body" });
+    expect(store.documents).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Evidence Upload" })])
+    );
   });
 
   it("denies document deletion for members", async () => {
@@ -1632,6 +1620,15 @@ describe("phase 1 auth and tenant foundation", () => {
 
     expect(invalidResult.statusCode).toBe(400);
     expect(invalidResult.json()).toEqual({ error: "invalid_audit_result" });
+
+    const unknownQuery = await app.inject({
+      method: "GET",
+      url: "/audit-events?limit=10&includeSecrets=true",
+      headers: { cookie: ownerCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(unknownQuery.statusCode).toBe(400);
+    expect(unknownQuery.json()).toEqual({ error: "invalid_query_parameters" });
   });
 
   it("returns security dashboard metrics alerts and risky events", async () => {

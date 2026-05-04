@@ -79,7 +79,7 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
     expect(response.json()).toEqual({ error: "document_not_found" });
   });
 
-  it("creates documents in the selected tenant even when body contains foreign tenant fields", async () => {
+  it("rejects foreign tenant fields before document creation", async () => {
     const app = buildApp({
       store: createUuidStore(),
       documentRepository: new PostgresDocumentRepository(database)
@@ -99,13 +99,8 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
       }
     });
 
-    expect(response.statusCode).toBe(201);
-    expect(response.json().document).toMatchObject({
-      tenantId: tenantAId,
-      projectId: tenantAProjectId,
-      title: "Tenant A Member Upload"
-    });
-    expect(response.json().document).not.toHaveProperty("storageKey");
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request_body" });
   });
 
   it("stores document versions behind tenant RLS and blocks download until scan is clean", async () => {
@@ -201,8 +196,7 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
       headers: { cookie, "x-tenant-id": tenantAId },
       payload: {
         name: "Tenant A API Evidence",
-        classification: "internal",
-        tenantId: tenantBId
+        classification: "internal"
       }
     });
 

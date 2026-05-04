@@ -41,6 +41,11 @@ import {
   InMemoryApiKeyRepository,
   type ApiKeyRepository
 } from "./api-keys.js";
+import {
+  InMemoryRateLimiter,
+  type RateLimiter,
+  type RateLimitRule
+} from "./rate-limiter.js";
 
 export type BuildAppOptions = {
   store?: AppStore;
@@ -50,17 +55,7 @@ export type BuildAppOptions = {
   apiKeyRepository?: ApiKeyRepository;
   scanQueue?: ScanJobQueue;
   storage?: PrivateObjectStorage;
-  rateLimitStore?: RateLimitStore;
-};
-
-type RateLimitStore = Map<string, { count: number; resetAt: number }>;
-
-type RateLimitRule = {
-  name: string;
-  limit: number;
-  windowMs: number;
-  match: (request: FastifyRequest) => boolean;
-  key: (request: FastifyRequest) => string;
+  rateLimiter?: RateLimiter;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -74,9 +69,26 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const storage = options.storage ?? new InMemoryPrivateObjectStorage(store.storageObjects);
   const scanQueue =
     options.scanQueue ?? new InMemoryScanJobQueue(store, documentRepository, storage);
-  const rateLimitStore = options.rateLimitStore ?? new Map();
+  const rateLimiter = options.rateLimiter ?? new InMemoryRateLimiter();
   const app = Fastify({
-    logger: config.env === "production",
+    logger:
+      config.env === "production"
+        ? {
+            redact: {
+              paths: [
+                "req.headers.authorization",
+                "req.headers.cookie",
+                "req.headers.x-csrf-token",
+                "req.body.password",
+                "req.body.token",
+                "req.body.key",
+                "req.body.apiKey",
+                "req.body.contentBase64"
+              ],
+              censor: "[REDACTED]"
+            }
+          }
+        : false,
     bodyLimit: 1_000_000
   });
 
@@ -91,7 +103,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       reply.header("Vary", "Origin");
     }
 
-    const rateLimitResult = applyRateLimit(rateLimitStore, request);
+    const rateLimitResult = await applyRateLimit(rateLimiter, request);
 
     if (!rateLimitResult.allowed) {
       reply.header("Retry-After", Math.ceil(rateLimitResult.retryAfterMs / 1000).toString());
@@ -105,6 +117,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!csrfCookie || csrfHeader !== csrfCookie) {
         return reply.code(403).send({ error: "csrf_token_invalid" });
       }
+    }
+  });
+
+  app.addHook("preValidation", async (request, reply) => {
+    const validation = validateRequestShape(request);
+
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.reason });
     }
   });
 
@@ -1626,6 +1646,78 @@ function requiresCsrfCheck(request: FastifyRequest): boolean {
   return !request.headers.authorization?.startsWith("Bearer ");
 }
 
+type RequestShapeRule = {
+  method: string;
+  pattern: RegExp;
+  bodyKeys?: readonly string[];
+  queryKeys?: readonly string[];
+};
+
+const requestShapeRules: RequestShapeRule[] = [
+  { method: "POST", pattern: /^\/auth\/dev-login$/, bodyKeys: ["email"] },
+  { method: "POST", pattern: /^\/tenants$/, bodyKeys: ["name", "slug"] },
+  { method: "POST", pattern: /^\/projects$/, bodyKeys: ["name", "classification"] },
+  { method: "PATCH", pattern: /^\/projects\/[^/]+$/, bodyKeys: ["name", "classification"] },
+  { method: "PATCH", pattern: /^\/memberships\/[^/]+\/role$/, bodyKeys: ["role"] },
+  {
+    method: "GET",
+    pattern: /^\/audit-events$/,
+    queryKeys: ["actorType", "action", "result", "limit"]
+  },
+  { method: "POST", pattern: /^\/api-keys$/, bodyKeys: ["name", "scopes", "expiresInDays"] },
+  { method: "POST", pattern: /^\/share-links$/, bodyKeys: ["documentId", "expiresInMinutes", "maxDownloads"] },
+  { method: "POST", pattern: /^\/tenant\/invitations$/, bodyKeys: ["email", "role"] },
+  { method: "POST", pattern: /^\/invitations\/accept$/, bodyKeys: ["token", "name"] },
+  { method: "POST", pattern: /^\/api\/v1\/documents$/, bodyKeys: ["title", "projectId", "classification"] },
+  { method: "POST", pattern: /^\/documents$/, bodyKeys: ["title", "projectId", "classification"] },
+  {
+    method: "POST",
+    pattern: /^\/documents\/[^/]+\/versions$/,
+    bodyKeys: ["originalFilename", "mimeType", "sizeBytes", "contentBase64"]
+  },
+  { method: "POST", pattern: /^\/document-versions\/[^/]+\/scan-result$/, bodyKeys: ["scanStatus"] },
+  { method: "POST", pattern: /^\/internal\/scan-jobs\/process-next$/, bodyKeys: [] }
+];
+
+function validateRequestShape(
+  request: FastifyRequest
+): { valid: true } | { valid: false; reason: string } {
+  const path = request.url.split("?")[0] ?? request.url;
+  const rule = requestShapeRules.find(
+    (candidate) => candidate.method === request.method && candidate.pattern.test(path)
+  );
+
+  if (!rule) {
+    return { valid: true };
+  }
+
+  if (rule.bodyKeys && !hasOnlyAllowedKeys(request.body, rule.bodyKeys)) {
+    return { valid: false, reason: "invalid_request_body" };
+  }
+
+  if (rule.queryKeys && !hasOnlyAllowedKeys(request.query, rule.queryKeys)) {
+    return { valid: false, reason: "invalid_query_parameters" };
+  }
+
+  return { valid: true };
+}
+
+function hasOnlyAllowedKeys(value: unknown, allowedKeys: readonly string[]): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  return Object.keys(value).every((key) => allowedKeys.includes(key));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const rateLimitRules: RateLimitRule[] = [
   {
     name: "auth",
@@ -1666,31 +1758,19 @@ const rateLimitRules: RateLimitRule[] = [
   }
 ];
 
-function applyRateLimit(
-  rateLimitStore: RateLimitStore,
+async function applyRateLimit(
+  rateLimiter: RateLimiter,
   request: FastifyRequest
-): { allowed: true } | { allowed: false; retryAfterMs: number } {
+): Promise<{ allowed: true } | { allowed: false; retryAfterMs: number }> {
   const rule = rateLimitRules.find((candidate) => candidate.match(request));
 
   if (!rule) {
     return { allowed: true };
   }
 
-  const now = Date.now();
   const key = `${rule.name}:${rule.key(request)}`;
-  const existing = rateLimitStore.get(key);
 
-  if (!existing || existing.resetAt <= now) {
-    rateLimitStore.set(key, { count: 1, resetAt: now + rule.windowMs });
-    return { allowed: true };
-  }
-
-  if (existing.count >= rule.limit) {
-    return { allowed: false, retryAfterMs: existing.resetAt - now };
-  }
-
-  existing.count += 1;
-  return { allowed: true };
+  return rateLimiter.consume(rule, key);
 }
 
 function normalizeEmail(email: string | undefined): string | undefined {
