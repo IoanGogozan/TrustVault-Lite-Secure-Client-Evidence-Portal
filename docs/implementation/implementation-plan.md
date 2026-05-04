@@ -167,7 +167,9 @@ Current worker note:
 
 ## Phase 5: Share Links
 
-Tasks:
+Status: implemented for the current demo scope.
+
+Completed:
 
 - Create expiring links.
 - Store token as a hash.
@@ -175,6 +177,10 @@ Tasks:
 - Allow revocation.
 - Log each access.
 - Do not expose storage path.
+
+Implementation note:
+
+- Details are documented in `docs/implementation/phase-5-share-links.md`.
 
 ## Phase 6: API Keys and External API
 

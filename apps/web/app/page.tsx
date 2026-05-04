@@ -7,6 +7,7 @@ import {
   FileUp,
   FolderPlus,
   KeyRound,
+  Link2,
   LockKeyhole,
   LogOut,
   Play,
@@ -62,6 +63,19 @@ type AuditEvent = {
   createdAt: string;
 };
 
+type ShareLink = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  permission: "download";
+  expiresAt: string;
+  maxDownloads?: number;
+  downloadCount: number;
+  revokedAt?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
 type DownloadMetadata = {
   documentId: string;
   versionId: string;
@@ -92,8 +106,10 @@ export default function Home() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
   const [projects, setProjects] = useState<Project[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [shareLinks, setShareLinks] = useState<ShareLink[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [downloadMetadata, setDownloadMetadata] = useState<DownloadMetadata | undefined>();
+  const [lastShareToken, setLastShareToken] = useState<string | undefined>();
   const [statusMessage, setStatusMessage] = useState<string | undefined>();
 
   const selectedMembership = useMemo(
@@ -139,9 +155,10 @@ export default function Home() {
   }
 
   async function refreshWorkspace(tenantId: string) {
-    const [projectResponse, documentResponse, auditResponse] = await Promise.all([
+    const [projectResponse, documentResponse, shareLinkResponse, auditResponse] = await Promise.all([
       apiGet<{ projects: Project[] }>("/projects", tenantId),
       apiGet<{ documents: DocumentRecord[] }>("/documents", tenantId),
+      apiGet<{ shareLinks: ShareLink[] }>("/share-links", tenantId),
       apiGet<{ auditEvents: AuditEvent[] }>("/audit-events", tenantId)
     ]);
 
@@ -152,6 +169,10 @@ export default function Home() {
 
     if (documentResponse) {
       setDocuments(documentResponse.documents);
+    }
+
+    if (shareLinkResponse) {
+      setShareLinks(shareLinkResponse.shareLinks);
     }
 
     setAuditEvents(auditResponse?.auditEvents ?? []);
@@ -283,6 +304,68 @@ export default function Home() {
     await refreshWorkspace(selectedMembership.tenantId);
   }
 
+  async function handleCreateShareLink(documentId: string) {
+    if (!selectedMembership) {
+      return;
+    }
+
+    const response = await apiPost<{ shareLink: ShareLink; shareToken: string }>(
+      "/share-links",
+      selectedMembership.tenantId,
+      {
+        documentId,
+        expiresInMinutes: 60,
+        maxDownloads: 3
+      }
+    );
+
+    if (!response) {
+      setStatusMessage("Share link could not be created");
+      return;
+    }
+
+    setLastShareToken(response.shareToken);
+    setStatusMessage("Share link created");
+    await refreshWorkspace(selectedMembership.tenantId);
+  }
+
+  async function handleUseShareLink() {
+    if (!lastShareToken || !selectedMembership) {
+      return;
+    }
+
+    const response = await fetch(`${apiBaseUrl}/public/share-links/${lastShareToken}`, {
+      credentials: "omit"
+    });
+
+    if (!response.ok) {
+      setStatusMessage("Share link is not available");
+      await refreshWorkspace(selectedMembership.tenantId);
+      return;
+    }
+
+    const payload = (await response.json()) as { download: DownloadMetadata };
+    setDownloadMetadata(payload.download);
+    setStatusMessage("Share link used");
+    await refreshWorkspace(selectedMembership.tenantId);
+  }
+
+  async function handleRevokeShareLink(shareLinkId: string) {
+    if (!selectedMembership) {
+      return;
+    }
+
+    const response = await apiDelete(`/share-links/${shareLinkId}`, selectedMembership.tenantId);
+
+    if (!response) {
+      setStatusMessage("Share link could not be revoked");
+      return;
+    }
+
+    setStatusMessage("Share link revoked");
+    await refreshWorkspace(selectedMembership.tenantId);
+  }
+
   async function apiGet<T>(path: string, tenantId: string): Promise<T | undefined> {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       credentials: "include",
@@ -304,6 +387,16 @@ export default function Home() {
     });
 
     return response.ok ? ((await response.json()) as T) : undefined;
+  }
+
+  async function apiDelete(path: string, tenantId: string): Promise<boolean> {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-Tenant-Id": tenantId }
+    });
+
+    return response.ok;
   }
 
   if (!currentUser) {
@@ -532,6 +625,13 @@ export default function Home() {
                   >
                     Prepare download
                   </button>
+                  <button
+                    className="compact-action"
+                    type="button"
+                    onClick={() => void handleCreateShareLink(document.id)}
+                  >
+                    Create link
+                  </button>
                 </div>
               ))}
             </div>
@@ -551,6 +651,43 @@ export default function Home() {
         </section>
 
         <section className="content-grid">
+          <article className="panel">
+            <div className="panel-heading">
+              <h2>Share links</h2>
+              <Link2 aria-hidden="true" />
+            </div>
+            {lastShareToken ? (
+              <div className="token-box">
+                <span>One-time token</span>
+                <code>{lastShareToken}</code>
+                <button className="compact-action" type="button" onClick={() => void handleUseShareLink()}>
+                  Use public link
+                </button>
+              </div>
+            ) : null}
+            <div className="record-list">
+              {shareLinks.map((shareLink) => (
+                <div className="record-row passive document-row" key={shareLink.id}>
+                  <div>
+                    <span>{shareLink.revokedAt ? "Revoked link" : "Active link"}</span>
+                    <small>
+                      {shareLink.downloadCount}
+                      {shareLink.maxDownloads ? `/${shareLink.maxDownloads}` : ""} downloads
+                    </small>
+                  </div>
+                  <button
+                    className="compact-action"
+                    type="button"
+                    disabled={Boolean(shareLink.revokedAt)}
+                    onClick={() => void handleRevokeShareLink(shareLink.id)}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          </article>
+
           <article className="panel" id="audit">
             <div className="panel-heading">
               <h2>Audit events</h2>

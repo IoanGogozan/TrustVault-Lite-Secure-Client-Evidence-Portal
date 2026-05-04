@@ -1136,6 +1136,167 @@ describe("phase 1 auth and tenant foundation", () => {
       ])
     );
   });
+
+  it("creates share links with one-time tokens and stores only token hashes", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        documentId: "document_acme_policy",
+        expiresInMinutes: 30,
+        maxDownloads: 2
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().shareToken).toEqual(expect.stringMatching(/^tv_share_/));
+    expect(response.json().shareLink).toMatchObject({
+      tenantId: "tenant_acme",
+      documentId: "document_acme_policy",
+      permission: "download",
+      maxDownloads: 2,
+      downloadCount: 0
+    });
+    expect(response.json().shareLink).not.toHaveProperty("tokenHash");
+    expect(store.shareLinks[0]?.tokenHash).not.toBe(response.json().shareToken);
+    expect(JSON.stringify(store.auditEvents)).not.toContain(response.json().shareToken);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "share_link.created",
+      entityType: "share_link",
+      result: "success"
+    });
+  });
+
+  it("allows public share link download and increments max download counters", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        documentId: "document_acme_policy",
+        maxDownloads: 1
+      }
+    });
+    const token = created.json().shareToken;
+
+    const firstUse = await app.inject({
+      method: "GET",
+      url: `/public/share-links/${token}`
+    });
+
+    expect(firstUse.statusCode).toBe(200);
+    expect(firstUse.json().download).toMatchObject({
+      documentId: "document_acme_policy",
+      originalFilename: "security-policy.pdf",
+      expiresInSeconds: 300
+    });
+    expect(firstUse.json().download).not.toHaveProperty("storageKey");
+    expect(firstUse.json().shareLink.downloadCount).toBe(1);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "share_link.used",
+      entityType: "share_link",
+      result: "success"
+    });
+
+    const secondUse = await app.inject({
+      method: "GET",
+      url: `/public/share-links/${token}`
+    });
+
+    expect(secondUse.statusCode).toBe(403);
+    expect(secondUse.json()).toEqual({ error: "share_link_download_limit_reached" });
+  });
+
+  it("rejects invalid expired and revoked share links", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/public/share-links/tv_share_invalid"
+    });
+
+    expect(invalid.statusCode).toBe(404);
+
+    const expired = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        documentId: "document_acme_policy",
+        expiresInMinutes: 1
+      }
+    });
+    store.shareLinks[0]!.expiresAt = new Date(Date.now() - 1000);
+
+    const expiredUse = await app.inject({
+      method: "GET",
+      url: `/public/share-links/${expired.json().shareToken}`
+    });
+
+    expect(expiredUse.statusCode).toBe(410);
+    expect(expiredUse.json()).toEqual({ error: "share_link_expired" });
+
+    const active = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        documentId: "document_acme_policy"
+      }
+    });
+
+    const revoke = await app.inject({
+      method: "DELETE",
+      url: `/share-links/${active.json().shareLink.id}`,
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(revoke.statusCode).toBe(200);
+
+    const revokedUse = await app.inject({
+      method: "GET",
+      url: `/public/share-links/${active.json().shareToken}`
+    });
+
+    expect(revokedUse.statusCode).toBe(403);
+    expect(revokedUse.json()).toEqual({ error: "share_link_revoked" });
+  });
+
+  it("denies share link creation for viewers", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const viewerCookie = await login(app, "viewer@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: viewerCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        documentId: "document_acme_policy"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(store.auditEvents.at(-1)).toMatchObject({
+      action: "authorization.denied",
+      entityType: "document",
+      result: "failure",
+      metadata: expect.objectContaining({
+        requestedAction: "documents:update"
+      })
+    });
+  });
 });
 
 async function login(app: ReturnType<typeof buildApp>, email: string): Promise<string> {

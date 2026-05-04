@@ -3,6 +3,7 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { buildApp } from "./app.js";
 import { PostgresDocumentRepository } from "./documents.js";
 import { PostgresProjectRepository } from "./projects.js";
+import { PostgresShareLinkRepository } from "./share-links.js";
 import {
   createDemoStore,
   type AppStore,
@@ -212,6 +213,71 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
       createdBy: ownerUserId
     });
   });
+
+  it("creates lists and revokes share links in the selected tenant context", async () => {
+    const app = buildApp({
+      store: createUuidStore(),
+      documentRepository: new PostgresDocumentRepository(database),
+      shareLinkRepository: new PostgresShareLinkRepository(database)
+    });
+    const ownerCookie = await login(app, "owner-db@acme.test");
+
+    const uploadResponse = await app.inject({
+      method: "POST",
+      url: `/documents/${tenantADocumentId}/versions`,
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId },
+      payload: pdfUploadPayload()
+    });
+    await app.inject({
+      method: "POST",
+      url: `/document-versions/${uploadResponse.json().version.id}/scan-result`,
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId },
+      payload: { scanStatus: "clean" }
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/share-links",
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId },
+      payload: {
+        documentId: tenantADocumentId,
+        maxDownloads: 2
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json().shareToken).toEqual(expect.stringMatching(/^tv_share_/));
+    expect(createResponse.json().shareLink).toMatchObject({
+      tenantId: tenantAId,
+      documentId: tenantADocumentId,
+      downloadCount: 0,
+      maxDownloads: 2
+    });
+    expect(createResponse.json().shareLink).not.toHaveProperty("tokenHash");
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/share-links",
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId }
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().shareLinks).toEqual([
+      expect.objectContaining({
+        id: createResponse.json().shareLink.id,
+        tenantId: tenantAId
+      })
+    ]);
+
+    const revokeResponse = await app.inject({
+      method: "DELETE",
+      url: `/share-links/${createResponse.json().shareLink.id}`,
+      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId }
+    });
+
+    expect(revokeResponse.statusCode).toBe(200);
+    expect(revokeResponse.json().shareLink).toHaveProperty("revokedAt");
+  });
 });
 
 async function seedDatabase(database: DatabasePool): Promise<void> {
@@ -246,6 +312,11 @@ async function seedDatabase(database: DatabasePool): Promise<void> {
       [tenantADocumentId, tenantAId, tenantAProjectId, ownerUserId]
     );
     await tx.execute(
+      `DELETE FROM share_links
+       WHERE tenant_id = $1`,
+      [tenantAId]
+    );
+    await tx.execute(
       `DELETE FROM document_versions
        WHERE tenant_id = $1
          AND document_id = $2`,
@@ -278,6 +349,11 @@ async function seedDatabase(database: DatabasePool): Promise<void> {
        VALUES ($1, $2, $3, 'Tenant B Evidence', 'confidential', $4, NULL)
        ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, current_version_id = NULL, deleted_at = NULL`,
       [tenantBDocumentId, tenantBId, tenantBProjectId, ownerUserId]
+    );
+    await tx.execute(
+      `DELETE FROM share_links
+       WHERE tenant_id = $1`,
+      [tenantBId]
     );
     await tx.execute(
       `DELETE FROM document_versions

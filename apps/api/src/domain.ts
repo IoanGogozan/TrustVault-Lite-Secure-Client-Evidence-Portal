@@ -85,6 +85,20 @@ export type ScanJob = {
   updatedAt: Date;
 };
 
+export type ShareLink = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  tokenHash: string;
+  permission: "download";
+  expiresAt: Date;
+  maxDownloads?: number;
+  downloadCount: number;
+  revokedAt?: Date;
+  createdBy: string;
+  createdAt: Date;
+};
+
 export type Session = {
   id: string;
   userId: string;
@@ -113,6 +127,7 @@ export type AppStore = {
   documents: Document[];
   documentVersions: DocumentVersion[];
   scanJobs: ScanJob[];
+  shareLinks: ShareLink[];
   storageObjects: Record<string, string>;
   invitations: Invitation[];
   auditEvents: AuditEvent[];
@@ -329,6 +344,7 @@ export function createDemoStore(): AppStore {
       }
     ],
     scanJobs: [],
+    shareLinks: [],
     storageObjects: {},
     invitations: [],
     auditEvents: [],

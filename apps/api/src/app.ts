@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { redactAuditMetadata } from "@trustvault/audit";
 import { readBaseConfig } from "@trustvault/config";
 import { InMemoryPrivateObjectStorage, type PrivateObjectStorage } from "@trustvault/storage";
@@ -31,11 +31,16 @@ import {
   type ProjectRepository
 } from "./projects.js";
 import { InMemoryScanJobQueue, type ScanJobQueue } from "./scan-worker.js";
+import {
+  InMemoryShareLinkRepository,
+  type ShareLinkRepository
+} from "./share-links.js";
 
 export type BuildAppOptions = {
   store?: AppStore;
   documentRepository?: DocumentRepository;
   projectRepository?: ProjectRepository;
+  shareLinkRepository?: ShareLinkRepository;
   scanQueue?: ScanJobQueue;
   storage?: PrivateObjectStorage;
 };
@@ -45,6 +50,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const store = options.store ?? createDemoStore();
   const documentRepository = options.documentRepository ?? new InMemoryDocumentRepository(store);
   const projectRepository = options.projectRepository ?? new InMemoryProjectRepository(store);
+  const shareLinkRepository =
+    options.shareLinkRepository ?? new InMemoryShareLinkRepository(store);
   const storage = options.storage ?? new InMemoryPrivateObjectStorage(store.storageObjects);
   const scanQueue =
     options.scanQueue ?? new InMemoryScanJobQueue(store, documentRepository, storage);
@@ -462,6 +469,170 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     };
   });
 
+  app.get("/share-links", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const allowed = await requirePermission(store, request, reply, "documents:read", {
+      tenantId: request.tenantContext.tenant.id,
+      entityType: "share_link"
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    return {
+      shareLinks: (await shareLinkRepository.list(request.tenantContext.tenant.id)).map(
+        toShareLinkResponse
+      )
+    };
+  });
+
+  app.post<{
+    Body: {
+      documentId?: string;
+      expiresInMinutes?: number;
+      maxDownloads?: number;
+    };
+  }>("/share-links", async (request, reply) => {
+    await requireTenantContext(store, request, reply);
+
+    if (!request.tenantContext) {
+      return;
+    }
+
+    const documentId = request.body.documentId;
+
+    if (!documentId) {
+      return reply.code(400).send({ error: "document_required" });
+    }
+
+    const document =
+      (await documentRepository.findByIdForAuthorization?.(documentId)) ??
+      (await documentRepository.findVisibleById(toDocumentReadScope(request.tenantContext), documentId));
+
+    if (!document) {
+      return reply.code(404).send({ error: "document_not_found" });
+    }
+
+    const allowed = await requirePermission(store, request, reply, "documents:update", {
+      tenantId: document.tenantId,
+      projectId: document.projectId,
+      classification: document.classification,
+      entityType: "document",
+      entityId: document.id
+    });
+
+    if (!allowed) {
+      return;
+    }
+
+    const version = await documentRepository.findCurrentVersionForDownload(
+      toDocumentReadScope(request.tenantContext),
+      document.id
+    );
+
+    if (!version || version.scanStatus !== "clean") {
+      return reply.code(409).send({ error: "document_not_available_for_sharing" });
+    }
+
+    const expiresInMinutes = clampInteger(request.body.expiresInMinutes ?? 60, 1, 10080);
+    const maxDownloads =
+      request.body.maxDownloads === undefined
+        ? undefined
+        : clampInteger(request.body.maxDownloads, 1, 100);
+    const token = createShareToken(request.tenantContext.tenant.id);
+    const shareLink = await shareLinkRepository.create({
+      tenantId: request.tenantContext.tenant.id,
+      documentId: document.id,
+      tokenHash: hashSecret(token),
+      expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000),
+      ...(maxDownloads ? { maxDownloads } : {}),
+      createdBy: request.tenantContext.user.id
+    });
+
+    appendAuditEvent(store, request, {
+      action: "share_link.created",
+      entityType: "share_link",
+      entityId: shareLink.id,
+      result: "success",
+      metadata: {
+        documentId: document.id,
+        expiresAt: shareLink.expiresAt.toISOString(),
+        maxDownloads: shareLink.maxDownloads
+      }
+    });
+
+    return reply.code(201).send({
+      shareLink: toShareLinkResponse(shareLink),
+      shareToken: token
+    });
+  });
+
+  app.delete<{ Params: { shareLinkId: string } }>(
+    "/share-links/:shareLinkId",
+    async (request, reply) => {
+      await requireTenantContext(store, request, reply);
+
+      if (!request.tenantContext) {
+        return;
+      }
+
+      const shareLink = await shareLinkRepository.findById(
+        request.tenantContext.tenant.id,
+        request.params.shareLinkId
+      );
+
+      if (!shareLink) {
+        return reply.code(404).send({ error: "share_link_not_found" });
+      }
+
+      const document =
+        (await documentRepository.findByIdForAuthorization?.(shareLink.documentId)) ??
+        (await documentRepository.findVisibleById(
+          toDocumentReadScope(request.tenantContext),
+          shareLink.documentId
+        ));
+
+      if (!document) {
+        return reply.code(404).send({ error: "document_not_found" });
+      }
+
+      const allowed = await requirePermission(store, request, reply, "documents:update", {
+        tenantId: document.tenantId,
+        projectId: document.projectId,
+        classification: document.classification,
+        entityType: "share_link",
+        entityId: shareLink.id
+      });
+
+      if (!allowed) {
+        return;
+      }
+
+      const revokedShareLink = await shareLinkRepository.revoke(
+        request.tenantContext.tenant.id,
+        shareLink.id
+      );
+
+      appendAuditEvent(store, request, {
+        action: "share_link.revoked",
+        entityType: "share_link",
+        entityId: shareLink.id,
+        result: "success",
+        metadata: {
+          documentId: shareLink.documentId
+        }
+      });
+
+      return { shareLink: toShareLinkResponse(revokedShareLink ?? shareLink) };
+    }
+  );
+
   app.post<{
     Body: { email?: string; role?: MembershipRole };
   }>("/tenant/invitations", async (request, reply) => {
@@ -580,6 +751,98 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       tenantId: invitation.tenantId,
       role: invitation.role
     });
+  });
+
+  app.get<{ Params: { token: string } }>("/public/share-links/:token", async (request, reply) => {
+    const tenantId = parseShareTokenTenantId(request.params.token);
+    const shareLink = await shareLinkRepository.findByTokenHash(
+      hashSecret(request.params.token),
+      tenantId
+    );
+
+    if (!shareLink) {
+      return reply.code(404).send({ error: "share_link_not_found" });
+    }
+
+    if (shareLink.revokedAt) {
+      appendPublicShareLinkAuditEvent(store, request, shareLink, "share_link.denied", "failure", {
+        reason: "revoked"
+      });
+      return reply.code(403).send({ error: "share_link_revoked" });
+    }
+
+    if (shareLink.expiresAt <= new Date()) {
+      appendPublicShareLinkAuditEvent(store, request, shareLink, "share_link.denied", "failure", {
+        reason: "expired"
+      });
+      return reply.code(410).send({ error: "share_link_expired" });
+    }
+
+    if (
+      shareLink.maxDownloads !== undefined &&
+      shareLink.downloadCount >= shareLink.maxDownloads
+    ) {
+      appendPublicShareLinkAuditEvent(store, request, shareLink, "share_link.denied", "failure", {
+        reason: "max_downloads_reached"
+      });
+      return reply.code(403).send({ error: "share_link_download_limit_reached" });
+    }
+
+    const document = await documentRepository.findVisibleById(
+      {
+        tenantId: shareLink.tenantId,
+        role: "owner"
+      },
+      shareLink.documentId
+    );
+
+    if (!document) {
+      appendPublicShareLinkAuditEvent(store, request, shareLink, "share_link.denied", "failure", {
+        reason: "document_not_found"
+      });
+      return reply.code(404).send({ error: "document_not_found" });
+    }
+
+    const version = await documentRepository.findCurrentVersionForDownload(
+      {
+        tenantId: shareLink.tenantId,
+        role: "owner"
+      },
+      document.id
+    );
+
+    if (!version || version.scanStatus !== "clean") {
+      appendPublicShareLinkAuditEvent(store, request, shareLink, "share_link.denied", "failure", {
+        reason: "document_not_available"
+      });
+      return reply.code(409).send({ error: "document_not_available" });
+    }
+
+    const signedDownload = await storage.createSignedDownload({
+      storageKey: version.storageKey,
+      expiresInSeconds: 300
+    });
+    const usedShareLink = await shareLinkRepository.incrementDownload(
+      shareLink.tenantId,
+      shareLink.id
+    );
+    appendPublicShareLinkAuditEvent(store, request, usedShareLink ?? shareLink, "share_link.used", "success", {
+      documentId: document.id,
+      versionId: version.id
+    });
+
+    return {
+      download: {
+        documentId: document.id,
+        versionId: version.id,
+        originalFilename: version.originalFilename,
+        mimeType: version.mimeType,
+        sizeBytes: version.sizeBytes,
+        expiresInSeconds: 300,
+        expiresAt: signedDownload.expiresAt.toISOString()
+      },
+      shareLink: toShareLinkResponse(usedShareLink ?? shareLink)
+    };
   });
 
   app.get("/documents", async (request, reply) => {
@@ -1130,6 +1393,36 @@ function appendAuditEvent(
   });
 }
 
+function appendPublicShareLinkAuditEvent(
+  store: AppStore,
+  request: FastifyRequest,
+  shareLink: {
+    id: string;
+    tenantId: string;
+    documentId: string;
+  },
+  action: string,
+  result: "success" | "failure",
+  metadata: Record<string, unknown>
+): void {
+  store.auditEvents.push({
+    id: `audit_${randomUUID()}`,
+    tenantId: shareLink.tenantId,
+    actorType: "system",
+    action,
+    entityType: "share_link",
+    entityId: shareLink.id,
+    result,
+    ipHash: hashSecret(request.ip),
+    userAgent: request.headers["user-agent"] ?? "unknown",
+    metadata: redactAuditMetadata({
+      documentId: shareLink.documentId,
+      ...metadata
+    }),
+    createdAt: new Date()
+  });
+}
+
 function isDocumentClassification(value: string): value is DocumentClassification {
   return (
     value === "public" ||
@@ -1225,6 +1518,32 @@ function toAuditEventResponse(event: {
   };
 }
 
+function toShareLinkResponse(shareLink: {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  permission: "download";
+  expiresAt: Date;
+  maxDownloads?: number;
+  downloadCount: number;
+  revokedAt?: Date;
+  createdBy: string;
+  createdAt: Date;
+}) {
+  return {
+    id: shareLink.id,
+    tenantId: shareLink.tenantId,
+    documentId: shareLink.documentId,
+    permission: shareLink.permission,
+    expiresAt: shareLink.expiresAt.toISOString(),
+    ...(shareLink.maxDownloads === undefined ? {} : { maxDownloads: shareLink.maxDownloads }),
+    downloadCount: shareLink.downloadCount,
+    ...(shareLink.revokedAt ? { revokedAt: shareLink.revokedAt.toISOString() } : {}),
+    createdBy: shareLink.createdBy,
+    createdAt: shareLink.createdAt.toISOString()
+  };
+}
+
 function decodeBase64(value: string): Buffer | undefined {
   try {
     const buffer = Buffer.from(value, "base64");
@@ -1253,6 +1572,36 @@ function toProjectReadScope(context: TenantRequestContext): ProjectReadScope {
 
 function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
+}
+
+function createShareToken(tenantId: string): string {
+  return `tv_share_${Buffer.from(tenantId, "utf8").toString("base64url")}.${randomBytes(32).toString("base64url")}`;
+}
+
+function parseShareTokenTenantId(token: string): string | undefined {
+  if (!token.startsWith("tv_share_")) {
+    return undefined;
+  }
+
+  const [tenantHint] = token.slice("tv_share_".length).split(".");
+
+  if (!tenantHint) {
+    return undefined;
+  }
+
+  try {
+    return Buffer.from(tenantHint, "base64url").toString("utf8") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(Math.max(Math.trunc(value), min), max);
 }
 
 function findOrCreateInvitedUser(
