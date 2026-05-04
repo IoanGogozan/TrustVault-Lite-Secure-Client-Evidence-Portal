@@ -1313,6 +1313,10 @@ describe("phase 1 auth and tenant foundation", () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json().shareToken).toEqual(expect.stringMatching(/^tv_share_/));
+    expect(tokenPublicId(response.json().shareToken, "tv_share")).toBe(response.json().shareLink.id);
+    expect(response.json().shareToken).not.toContain(
+      Buffer.from("tenant_acme", "utf8").toString("base64url")
+    );
     expect(response.json().shareLink).toMatchObject({
       tenantId: "tenant_acme",
       documentId: "document_acme_policy",
@@ -1474,6 +1478,10 @@ describe("phase 1 auth and tenant foundation", () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json().key).toEqual(expect.stringMatching(/^tv_live_/));
+    expect(tokenPublicId(response.json().key, "tv_live")).toBe(response.json().apiKey.id);
+    expect(response.json().key).not.toContain(
+      Buffer.from("tenant_acme", "utf8").toString("base64url")
+    );
     expect(response.json().apiKey).toMatchObject({
       tenantId: "tenant_acme",
       name: "Read Only Integration",
@@ -1884,6 +1892,16 @@ function internalWorkerHeaders(cookie: string, tenantId: string) {
     "x-tenant-id": tenantId,
     "x-internal-worker-token": "trustvault-demo-worker"
   };
+}
+
+function tokenPublicId(token: string, prefix: "tv_live" | "tv_share"): string {
+  const [tokenPrefix] = token.split(".");
+
+  if (!tokenPrefix?.startsWith(`${prefix}_`)) {
+    throw new Error("Unexpected token format");
+  }
+
+  return tokenPrefix.slice(`${prefix}_`.length);
 }
 
 function pdfUploadPayload(marker = "") {

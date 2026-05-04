@@ -264,6 +264,17 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
       })
     ]);
 
+    const publicUseResponse = await app.inject({
+      method: "GET",
+      url: `/public/share-links/${createResponse.json().shareToken}`
+    });
+
+    expect(publicUseResponse.statusCode).toBe(200);
+    expect(publicUseResponse.json().download).toMatchObject({
+      documentId: tenantADocumentId,
+      originalFilename: "database-evidence.pdf"
+    });
+
     const revokeResponse = await app.inject({
       method: "DELETE",
       url: `/share-links/${createResponse.json().shareLink.id}`,
@@ -277,6 +288,7 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
   it("creates lists and revokes API keys in the selected tenant context", async () => {
     const app = buildApp({
       store: createUuidStore(),
+      documentRepository: new PostgresDocumentRepository(database),
       apiKeyRepository: new PostgresApiKeyRepository(database)
     });
     const ownerCookie = await login(app, "owner-db@acme.test");
@@ -314,6 +326,22 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
         tenantId: tenantAId
       })
     ]);
+
+    const externalResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/documents",
+      headers: { authorization: `Bearer ${createResponse.json().key}` }
+    });
+
+    expect(externalResponse.statusCode).toBe(200);
+    expect(externalResponse.json().documents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: tenantADocumentId,
+          tenantId: tenantAId
+        })
+      ])
+    );
 
     const revokeResponse = await app.inject({
       method: "DELETE",

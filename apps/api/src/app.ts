@@ -677,12 +677,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       request.body.expiresInDays === undefined
         ? undefined
         : clampInteger(request.body.expiresInDays, 1, 365);
-    const apiKeyValue = createApiKeyValue(request.tenantContext.tenant.id);
+    const apiKeyValue = createOpaqueToken("tv_live");
     const apiKey = await apiKeyRepository.create({
+      id: apiKeyValue.id,
       tenantId: request.tenantContext.tenant.id,
       name,
-      keyPrefix: apiKeyValue.split(".")[0] ?? "tv_live",
-      keyHash: hashSecret(apiKeyValue),
+      keyPrefix: apiKeyValue.prefix,
+      keyHash: hashSecret(apiKeyValue.secret),
       scopes: Array.from(new Set(scopes)),
       ...(expiresInDays
         ? { expiresAt: new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) }
@@ -704,7 +705,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     return reply.code(201).send({
       apiKey: toApiKeyResponse(apiKey),
-      key: apiKeyValue
+      key: apiKeyValue.value
     });
   });
 
@@ -803,11 +804,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       request.body.maxDownloads === undefined
         ? undefined
         : clampInteger(request.body.maxDownloads, 1, 100);
-    const token = createShareToken(request.tenantContext.tenant.id);
+    const token = createOpaqueToken("tv_share");
     const shareLink = await shareLinkRepository.create({
+      id: token.id,
       tenantId: request.tenantContext.tenant.id,
       documentId: document.id,
-      tokenHash: hashSecret(token),
+      tokenHash: hashSecret(token.secret),
       expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000),
       ...(maxDownloads ? { maxDownloads } : {}),
       createdBy: request.tenantContext.user.id
@@ -827,7 +829,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     return reply.code(201).send({
       shareLink: toShareLinkResponse(shareLink),
-      shareToken: token
+      shareToken: token.value
     });
   });
 
@@ -1012,11 +1014,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.get<{ Params: { token: string } }>("/public/share-links/:token", async (request, reply) => {
-    const tenantId = parseShareTokenTenantId(request.params.token);
-    const shareLink = await shareLinkRepository.findByTokenHash(
-      hashSecret(request.params.token),
-      tenantId
-    );
+    const parsedToken = parseOpaqueToken(request.params.token, "tv_share");
+    const shareLink = parsedToken
+      ? await shareLinkRepository.findByIdAndTokenHash(
+          parsedToken.id,
+          hashSecret(parsedToken.secret)
+        )
+      : undefined;
 
     if (!shareLink) {
       return reply.code(404).send({ error: "share_link_not_found" });
@@ -1954,8 +1958,10 @@ async function requireApiKey(
     return undefined;
   }
 
-  const tenantId = parseApiKeyTenantId(key);
-  const apiKey = await apiKeyRepository.findByHash(hashSecret(key), tenantId);
+  const parsedKey = parseOpaqueToken(key, "tv_live");
+  const apiKey = parsedKey
+    ? await apiKeyRepository.findByIdAndHash(parsedKey.id, hashSecret(parsedKey.secret))
+    : undefined;
 
   if (!apiKey) {
     await reply.code(401).send({ error: "api_key_invalid" });
@@ -2325,48 +2331,44 @@ function hashRateLimitSubject(subject: string): string {
   return createHash("sha256").update(subject).digest("hex");
 }
 
-function createShareToken(tenantId: string): string {
-  return `tv_share_${Buffer.from(tenantId, "utf8").toString("base64url")}.${randomBytes(32).toString("base64url")}`;
+function createOpaqueToken(prefix: "tv_live" | "tv_share"): {
+  id: string;
+  prefix: string;
+  secret: string;
+  value: string;
+} {
+  const id = randomUUID();
+  const secret = randomBytes(32).toString("base64url");
+  const tokenPrefix = `${prefix}_${id}`;
+
+  return {
+    id,
+    prefix: tokenPrefix,
+    secret,
+    value: `${tokenPrefix}.${secret}`
+  };
 }
 
-function parseShareTokenTenantId(token: string): string | undefined {
-  if (!token.startsWith("tv_share_")) {
+function parseOpaqueToken(
+  token: string,
+  prefix: "tv_live" | "tv_share"
+): { id: string; secret: string } | undefined {
+  const [tokenPrefix, secret] = token.split(".");
+  const expectedPrefix = `${prefix}_`;
+
+  if (!tokenPrefix?.startsWith(expectedPrefix) || !secret) {
     return undefined;
   }
 
-  const [tenantHint] = token.slice("tv_share_".length).split(".");
+  const id = tokenPrefix.slice(expectedPrefix.length);
 
-  if (!tenantHint) {
-    return undefined;
-  }
-
-  try {
-    return Buffer.from(tenantHint, "base64url").toString("utf8") || undefined;
-  } catch {
-    return undefined;
-  }
+  return isUuid(id) ? { id, secret } : undefined;
 }
 
-function createApiKeyValue(tenantId: string): string {
-  return `tv_live_${Buffer.from(tenantId, "utf8").toString("base64url")}.${randomBytes(32).toString("base64url")}`;
-}
-
-function parseApiKeyTenantId(apiKey: string): string | undefined {
-  if (!apiKey.startsWith("tv_live_")) {
-    return undefined;
-  }
-
-  const [tenantHint] = apiKey.slice("tv_live_".length).split(".");
-
-  if (!tenantHint) {
-    return undefined;
-  }
-
-  try {
-    return Buffer.from(tenantHint, "base64url").toString("utf8") || undefined;
-  } catch {
-    return undefined;
-  }
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
 }
 
 function isApiKeyScope(scope: string): scope is ApiKeyScope {

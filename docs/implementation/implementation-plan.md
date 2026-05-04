@@ -211,7 +211,7 @@ Remaining hardening:
 Format:
 
 ```text
-tv_live_7f3a9c_xxxxxxxxxxxxxxxxxxxxxxxxx
+tv_live_<keyId>.<secret>
 ```
 
 ## Phase 7: Audit Logs and Security Dashboard

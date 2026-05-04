@@ -1,8 +1,8 @@
 import { withTenantContext, type DatabasePool } from "@trustvault/database";
-import { randomUUID } from "node:crypto";
 import type { AppStore, ShareLink } from "./domain.js";
 
 export type CreateShareLinkInput = {
+  id: string;
   tenantId: string;
   documentId: string;
   tokenHash: string;
@@ -16,7 +16,11 @@ export type ShareLinkRepository = {
   findById(tenantId: string, shareLinkId: string): Promise<ShareLink | undefined>;
   create(input: CreateShareLinkInput): Promise<ShareLink>;
   revoke(tenantId: string, shareLinkId: string): Promise<ShareLink | undefined>;
-  findByTokenHash(tokenHash: string, tenantId?: string): Promise<ShareLink | undefined>;
+  findByIdAndTokenHash(
+    shareLinkId: string,
+    tokenHash: string,
+    tenantId?: string
+  ): Promise<ShareLink | undefined>;
   incrementDownload(tenantId: string, shareLinkId: string): Promise<ShareLink | undefined>;
 };
 
@@ -37,7 +41,7 @@ export class InMemoryShareLinkRepository implements ShareLinkRepository {
 
   async create(input: CreateShareLinkInput): Promise<ShareLink> {
     const shareLink = {
-      id: `share_link_${randomUUID()}`,
+      id: input.id,
       tenantId: input.tenantId,
       documentId: input.documentId,
       tokenHash: input.tokenHash,
@@ -66,10 +70,16 @@ export class InMemoryShareLinkRepository implements ShareLinkRepository {
     return shareLink;
   }
 
-  async findByTokenHash(tokenHash: string, tenantId?: string): Promise<ShareLink | undefined> {
+  async findByIdAndTokenHash(
+    shareLinkId: string,
+    tokenHash: string,
+    tenantId?: string
+  ): Promise<ShareLink | undefined> {
     return this.store.shareLinks.find(
       (shareLink) =>
-        shareLink.tokenHash === tokenHash && (!tenantId || shareLink.tenantId === tenantId)
+        shareLink.id === shareLinkId &&
+        shareLink.tokenHash === tokenHash &&
+        (!tenantId || shareLink.tenantId === tenantId)
     );
   }
 
@@ -117,10 +127,11 @@ export class PostgresShareLinkRepository implements ShareLinkRepository {
   async create(input: CreateShareLinkInput): Promise<ShareLink> {
     return withTenantContext(this.database, input.tenantId, async (tx) => {
       const result = await tx.execute<ShareLinkRow>(
-        `INSERT INTO share_links (tenant_id, document_id, token_hash, permission, expires_at, max_downloads, created_by)
-         VALUES ($1, $2, $3, 'download', $4, $5, $6)
+        `INSERT INTO share_links (id, tenant_id, document_id, token_hash, permission, expires_at, max_downloads, created_by)
+         VALUES ($1, $2, $3, $4, 'download', $5, $6, $7)
          RETURNING id, tenant_id, document_id, token_hash, permission, expires_at, max_downloads, download_count, revoked_at, created_by, created_at`,
         [
+          input.id,
           input.tenantId,
           input.documentId,
           input.tokenHash,
@@ -153,17 +164,30 @@ export class PostgresShareLinkRepository implements ShareLinkRepository {
     });
   }
 
-  async findByTokenHash(tokenHash: string, tenantId?: string): Promise<ShareLink | undefined> {
+  async findByIdAndTokenHash(
+    shareLinkId: string,
+    tokenHash: string,
+    tenantId?: string
+  ): Promise<ShareLink | undefined> {
     if (!tenantId) {
-      return undefined;
+      return this.database.transaction(async (tx) => {
+        const result = await tx.execute<ShareLinkRow>(
+          `SELECT id, tenant_id, document_id, token_hash, permission, expires_at, max_downloads, download_count, revoked_at, created_by, created_at
+           FROM resolve_share_link_by_secret($1, $2)`,
+          [shareLinkId, tokenHash]
+        );
+
+        return result.rows[0] ? fromShareLinkRow(result.rows[0]) : undefined;
+      });
     }
 
     return withTenantContext(this.database, tenantId, async (tx) => {
       const result = await tx.execute<ShareLinkRow>(
         `SELECT id, tenant_id, document_id, token_hash, permission, expires_at, max_downloads, download_count, revoked_at, created_by, created_at
          FROM share_links
-         WHERE token_hash = $1`,
-        [tokenHash]
+         WHERE id = $1
+           AND token_hash = $2`,
+        [shareLinkId, tokenHash]
       );
 
       return result.rows[0] ? fromShareLinkRow(result.rows[0]) : undefined;

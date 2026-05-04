@@ -1,8 +1,8 @@
 import { withTenantContext, type DatabasePool } from "@trustvault/database";
-import { randomUUID } from "node:crypto";
 import type { ApiKey, ApiKeyScope, AppStore } from "./domain.js";
 
 export type CreateApiKeyInput = {
+  id: string;
   tenantId: string;
   name: string;
   keyPrefix: string;
@@ -16,7 +16,7 @@ export type ApiKeyRepository = {
   list(tenantId: string): Promise<ApiKey[]>;
   create(input: CreateApiKeyInput): Promise<ApiKey>;
   revoke(tenantId: string, apiKeyId: string): Promise<ApiKey | undefined>;
-  findByHash(keyHash: string, tenantId?: string): Promise<ApiKey | undefined>;
+  findByIdAndHash(apiKeyId: string, keyHash: string, tenantId?: string): Promise<ApiKey | undefined>;
   markUsed(tenantId: string, apiKeyId: string): Promise<ApiKey | undefined>;
 };
 
@@ -31,7 +31,7 @@ export class InMemoryApiKeyRepository implements ApiKeyRepository {
 
   async create(input: CreateApiKeyInput): Promise<ApiKey> {
     const apiKey = {
-      id: `api_key_${randomUUID()}`,
+      id: input.id,
       tenantId: input.tenantId,
       name: input.name,
       keyPrefix: input.keyPrefix,
@@ -61,9 +61,16 @@ export class InMemoryApiKeyRepository implements ApiKeyRepository {
     return apiKey;
   }
 
-  async findByHash(keyHash: string, tenantId?: string): Promise<ApiKey | undefined> {
+  async findByIdAndHash(
+    apiKeyId: string,
+    keyHash: string,
+    tenantId?: string
+  ): Promise<ApiKey | undefined> {
     return this.store.apiKeys.find(
-      (apiKey) => apiKey.keyHash === keyHash && (!tenantId || apiKey.tenantId === tenantId)
+      (apiKey) =>
+        apiKey.id === apiKeyId &&
+        apiKey.keyHash === keyHash &&
+        (!tenantId || apiKey.tenantId === tenantId)
     );
   }
 
@@ -100,10 +107,11 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
   async create(input: CreateApiKeyInput): Promise<ApiKey> {
     return withTenantContext(this.database, input.tenantId, async (tx) => {
       const result = await tx.execute<ApiKeyRow>(
-        `INSERT INTO api_keys (tenant_id, name, key_prefix, key_hash, scopes, expires_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO api_keys (id, tenant_id, name, key_prefix, key_hash, scopes, expires_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, tenant_id, name, key_prefix, key_hash, scopes, expires_at, last_used_at, revoked_at, created_by, created_at`,
         [
+          input.id,
           input.tenantId,
           input.name,
           input.keyPrefix,
@@ -137,17 +145,30 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
     });
   }
 
-  async findByHash(keyHash: string, tenantId?: string): Promise<ApiKey | undefined> {
+  async findByIdAndHash(
+    apiKeyId: string,
+    keyHash: string,
+    tenantId?: string
+  ): Promise<ApiKey | undefined> {
     if (!tenantId) {
-      return undefined;
+      return this.database.transaction(async (tx) => {
+        const result = await tx.execute<ApiKeyRow>(
+          `SELECT id, tenant_id, name, key_prefix, key_hash, scopes, expires_at, last_used_at, revoked_at, created_by, created_at
+           FROM resolve_api_key_by_secret($1, $2)`,
+          [apiKeyId, keyHash]
+        );
+
+        return result.rows[0] ? fromApiKeyRow(result.rows[0]) : undefined;
+      });
     }
 
     return withTenantContext(this.database, tenantId, async (tx) => {
       const result = await tx.execute<ApiKeyRow>(
         `SELECT id, tenant_id, name, key_prefix, key_hash, scopes, expires_at, last_used_at, revoked_at, created_by, created_at
          FROM api_keys
-         WHERE key_hash = $1`,
-        [keyHash]
+         WHERE id = $1
+           AND key_hash = $2`,
+        [apiKeyId, keyHash]
       );
 
       return result.rows[0] ? fromApiKeyRow(result.rows[0]) : undefined;

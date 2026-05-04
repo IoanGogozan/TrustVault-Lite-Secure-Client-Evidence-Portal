@@ -30,7 +30,8 @@ Relevant events:
 ## Share Links
 
 - Share link tokens are generated with high entropy and shown only once.
-- Stored records contain only `token_hash`.
+- Share link tokens use opaque `tv_share_<linkId>.<secret>` values and do not encode tenant IDs.
+- Stored records contain only the secret hash in `token_hash`.
 - Links can expire, enforce `maxDownloads`, and be revoked.
 - Public share link responses include expiring download metadata only.
 - Share link creation requires update access to the target document.
@@ -47,7 +48,8 @@ Relevant events:
 
 - API keys use generated `tv_live_...` values.
 - The full key is returned only during creation.
-- Stored records contain only `key_hash`.
+- API keys use opaque `tv_live_<keyId>.<secret>` values and do not encode tenant IDs.
+- Stored records contain only the secret hash in `key_hash`.
 - List and revoke responses expose only metadata such as `keyPrefix`, scopes, expiry, and status.
 - External API requests require `Authorization: Bearer <key>`.
 - Revoked and expired keys are rejected.

@@ -248,3 +248,87 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   audit_events,
   support_access_requests
 TO trustvault_app;
+
+CREATE OR REPLACE FUNCTION resolve_share_link_by_secret(
+  p_id uuid,
+  p_token_hash text
+)
+RETURNS TABLE (
+  id uuid,
+  tenant_id uuid,
+  document_id uuid,
+  token_hash text,
+  permission text,
+  expires_at timestamptz,
+  max_downloads integer,
+  download_count integer,
+  revoked_at timestamptz,
+  created_by uuid,
+  created_at timestamptz
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    share_links.id,
+    share_links.tenant_id,
+    share_links.document_id,
+    share_links.token_hash,
+    share_links.permission,
+    share_links.expires_at,
+    share_links.max_downloads,
+    share_links.download_count,
+    share_links.revoked_at,
+    share_links.created_by,
+    share_links.created_at
+  FROM share_links
+  WHERE share_links.id = p_id
+    AND share_links.token_hash = p_token_hash
+  LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION resolve_share_link_by_secret(uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION resolve_share_link_by_secret(uuid, text) TO trustvault_app;
+
+CREATE OR REPLACE FUNCTION resolve_api_key_by_secret(
+  p_id uuid,
+  p_key_hash text
+)
+RETURNS TABLE (
+  id uuid,
+  tenant_id uuid,
+  name text,
+  key_prefix text,
+  key_hash text,
+  scopes text[],
+  expires_at timestamptz,
+  last_used_at timestamptz,
+  revoked_at timestamptz,
+  created_by uuid,
+  created_at timestamptz
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    api_keys.id,
+    api_keys.tenant_id,
+    api_keys.name,
+    api_keys.key_prefix,
+    api_keys.key_hash,
+    api_keys.scopes,
+    api_keys.expires_at,
+    api_keys.last_used_at,
+    api_keys.revoked_at,
+    api_keys.created_by,
+    api_keys.created_at
+  FROM api_keys
+  WHERE api_keys.id = p_id
+    AND api_keys.key_hash = p_key_hash
+  LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION resolve_api_key_by_secret(uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION resolve_api_key_by_secret(uuid, text) TO trustvault_app;
