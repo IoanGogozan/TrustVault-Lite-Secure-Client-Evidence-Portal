@@ -110,6 +110,43 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(accepted.statusCode).toBe(201);
   });
 
+  it("rejects browser-like mutating session requests without an origin", async () => {
+    const app = buildApp({ store: createDemoStore() });
+    const cookie = await login(app, "owner@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/tenants",
+      headers: {
+        cookie,
+        "sec-fetch-site": "cross-site"
+      },
+      payload: { name: "Missing Origin Security" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "origin_not_allowed" });
+  });
+
+  it("rejects browser mutating session requests from unknown origins", async () => {
+    const app = buildApp({ store: createDemoStore() });
+    const cookie = await login(app, "owner@acme.test");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/tenants",
+      headers: {
+        cookie,
+        origin: "https://evil.example",
+        "x-csrf-token": csrfTokenFromCookie(cookie)
+      },
+      payload: { name: "Bad Origin Security" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "origin_not_allowed" });
+  });
+
   it("rejects request bodies above the configured limit without stack traces", async () => {
     const app = buildApp({ store: createDemoStore() });
 
@@ -1004,7 +1041,7 @@ describe("phase 1 auth and tenant foundation", () => {
     const scan = await app.inject({
       method: "POST",
       url: `/document-versions/${versionId}/scan-result`,
-      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" },
+      headers: internalWorkerHeaders(adminCookie, "tenant_acme"),
       payload: { scanStatus: "clean" }
     });
 
@@ -1028,6 +1065,29 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(download.json().download).not.toHaveProperty("storagePath");
   });
 
+  it("requires an internal worker token for manual scan result updates", async () => {
+    const app = buildApp({ store: createDemoStore() });
+    const memberCookie = await login(app, "member@acme.test");
+    const adminCookie = await login(app, "admin@acme.test");
+
+    const upload = await app.inject({
+      method: "POST",
+      url: "/documents/document_acme_policy/versions",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: pdfUploadPayload()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/document-versions/${upload.json().version.id}/scan-result`,
+      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" },
+      payload: { scanStatus: "clean" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "internal_worker_required" });
+  });
+
   it("keeps blocked files unavailable for download", async () => {
     const app = buildApp({ store: createDemoStore() });
     const memberCookie = await login(app, "member@acme.test");
@@ -1044,7 +1104,7 @@ describe("phase 1 auth and tenant foundation", () => {
     await app.inject({
       method: "POST",
       url: `/document-versions/${versionId}/scan-result`,
-      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" },
+      headers: internalWorkerHeaders(adminCookie, "tenant_acme"),
       payload: { scanStatus: "blocked" }
     });
 
@@ -1075,7 +1135,7 @@ describe("phase 1 auth and tenant foundation", () => {
     const scanJob = await app.inject({
       method: "POST",
       url: "/internal/scan-jobs/process-next",
-      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" }
+      headers: internalWorkerHeaders(adminCookie, "tenant_acme")
     });
 
     expect(scanJob.statusCode).toBe(200);
@@ -1116,6 +1176,30 @@ describe("phase 1 auth and tenant foundation", () => {
     expect(download.json().download).not.toHaveProperty("storageKey");
   });
 
+  it("requires an internal worker token for scan job processing", async () => {
+    const store = createDemoStore();
+    const app = buildApp({ store });
+    const memberCookie = await login(app, "member@acme.test");
+    const adminCookie = await login(app, "admin@acme.test");
+
+    await app.inject({
+      method: "POST",
+      url: "/documents/document_acme_policy/versions",
+      headers: { cookie: memberCookie, "x-tenant-id": "tenant_acme" },
+      payload: pdfUploadPayload()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/scan-jobs/process-next",
+      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "internal_worker_required" });
+    expect(store.scanJobs[0]?.status).toBe("queued");
+  });
+
   it("processes the queued scan job and keeps malware-demo files blocked", async () => {
     const store = createDemoStore();
     const app = buildApp({ store });
@@ -1133,7 +1217,7 @@ describe("phase 1 auth and tenant foundation", () => {
     const scanJob = await app.inject({
       method: "POST",
       url: "/internal/scan-jobs/process-next",
-      headers: { cookie: adminCookie, "x-tenant-id": "tenant_acme" }
+      headers: internalWorkerHeaders(adminCookie, "tenant_acme")
     });
 
     expect(scanJob.statusCode).toBe(200);
@@ -1190,7 +1274,7 @@ describe("phase 1 auth and tenant foundation", () => {
     await app.inject({
       method: "POST",
       url: "/internal/scan-jobs/process-next",
-      headers: { cookie: ownerCookie, "x-tenant-id": "tenant_acme" }
+      headers: internalWorkerHeaders(ownerCookie, "tenant_acme")
     });
 
     const auditResponse = await app.inject({
@@ -1466,6 +1550,42 @@ describe("phase 1 auth and tenant foundation", () => {
 
     expect(createDenied.statusCode).toBe(403);
     expect(createDenied.json()).toEqual({ error: "api_key_scope_denied" });
+  });
+
+  it("does not store raw bearer tokens in rate limit keys", async () => {
+    const store = createDemoStore();
+    const capturedKeys: string[] = [];
+    const app = buildApp({
+      store,
+      rateLimiter: {
+        async consume(_rule, key) {
+          capturedKeys.push(key);
+          return { allowed: true };
+        }
+      }
+    });
+    const ownerCookie = await login(app, "owner@acme.test");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api-keys",
+      headers: { cookie: ownerCookie, "x-tenant-id": "tenant_acme" },
+      payload: {
+        name: "Read Only Integration",
+        scopes: ["documents:read"]
+      }
+    });
+    const key = created.json().key;
+
+    await app.inject({
+      method: "GET",
+      url: "/api/v1/documents",
+      headers: { authorization: `Bearer ${key}` }
+    });
+
+    expect(capturedKeys.some((capturedKey) => capturedKey.includes(key))).toBe(false);
+    expect(capturedKeys).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^external-api:external-api:[a-f0-9]{64}:/)])
+    );
   });
 
   it("allows write-scoped API keys to create documents", async () => {
@@ -1756,6 +1876,14 @@ function csrfTokenFromCookie(cookie: string): string {
   }
 
   return csrfCookie.split("=")[1] ?? "";
+}
+
+function internalWorkerHeaders(cookie: string, tenantId: string) {
+  return {
+    cookie,
+    "x-tenant-id": tenantId,
+    "x-internal-worker-token": "trustvault-demo-worker"
+  };
 }
 
 function pdfUploadPayload(marker = "") {

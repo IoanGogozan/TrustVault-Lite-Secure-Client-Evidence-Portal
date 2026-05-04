@@ -111,6 +111,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
 
     if (requiresCsrfCheck(request)) {
+      const origin = request.headers.origin;
+
+      if (!origin || !isAllowedOrigin(origin)) {
+        return reply.code(403).send({ error: "origin_not_allowed" });
+      }
+
       const csrfCookie = readCookie(request, csrfCookieName);
       const csrfHeader = request.headers["x-csrf-token"];
 
@@ -1458,6 +1464,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     Params: { versionId: string };
     Body: { scanStatus?: "clean" | "blocked" };
   }>("/document-versions/:versionId/scan-result", async (request, reply) => {
+    if (!isInternalWorkerRequest(request, config.env)) {
+      return reply.code(403).send({ error: "internal_worker_required" });
+    }
+
     await requireTenantContext(store, request, reply);
 
     if (!request.tenantContext) {
@@ -1499,6 +1509,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.post("/internal/scan-jobs/process-next", async (request, reply) => {
+    if (!isInternalWorkerRequest(request, config.env)) {
+      return reply.code(403).send({ error: "internal_worker_required" });
+    }
+
     await requireTenantContext(store, request, reply);
 
     if (!request.tenantContext) {
@@ -1631,10 +1645,6 @@ function requiresCsrfCheck(request: FastifyRequest): boolean {
     return false;
   }
 
-  if (!request.headers.origin || !isAllowedOrigin(request.headers.origin)) {
-    return false;
-  }
-
   if (request.url === "/auth/dev-login" || request.url === "/invitations/accept") {
     return false;
   }
@@ -1643,7 +1653,22 @@ function requiresCsrfCheck(request: FastifyRequest): boolean {
     return false;
   }
 
-  return !request.headers.authorization?.startsWith("Bearer ");
+  if (request.headers.authorization?.startsWith("Bearer ")) {
+    return false;
+  }
+
+  return Boolean(request.headers.origin || request.headers["sec-fetch-site"]);
+}
+
+function isInternalWorkerRequest(request: FastifyRequest, env: string): boolean {
+  const configuredToken = process.env.INTERNAL_WORKER_TOKEN;
+  const suppliedToken = request.headers["x-internal-worker-token"];
+
+  if (configuredToken) {
+    return suppliedToken === configuredToken;
+  }
+
+  return env !== "production" && suppliedToken === "trustvault-demo-worker";
 }
 
 type RequestShapeRule = {
@@ -1738,8 +1763,11 @@ const rateLimitRules: RateLimitRule[] = [
     limit: 60,
     windowMs: 60_000,
     match: (request) => request.url.startsWith("/api/v1/"),
-    key: (request) =>
-      `external-api:${request.headers.authorization ?? "anonymous"}:${request.ip}`
+    key: (request) => {
+      const authorization = request.headers.authorization ?? "anonymous";
+
+      return `external-api:${hashRateLimitSubject(authorization)}:${request.ip}`;
+    }
   },
   {
     name: "share-links",
@@ -2291,6 +2319,10 @@ function toProjectReadScope(context: TenantRequestContext): ProjectReadScope {
 
 function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
+}
+
+function hashRateLimitSubject(subject: string): string {
+  return createHash("sha256").update(subject).digest("hex");
 }
 
 function createShareToken(tenantId: string): string {

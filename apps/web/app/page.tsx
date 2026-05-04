@@ -333,7 +333,7 @@ export default function Home() {
       sizeBytes: content.length,
       contentBase64: btoa(content)
     });
-    await apiPost("/internal/scan-jobs/process-next", selectedMembership.tenantId, {});
+    await apiPost("/internal/scan-jobs/process-next", selectedMembership.tenantId, {}, true);
 
     setStatusMessage("Document uploaded");
     await refreshWorkspace(selectedMembership.tenantId);
@@ -492,13 +492,19 @@ export default function Home() {
     return response.ok ? ((await response.json()) as T) : undefined;
   }
 
-  async function apiPost<T>(path: string, tenantId: string, body: unknown): Promise<T | undefined> {
+  async function apiPost<T>(
+    path: string,
+    tenantId: string,
+    body: unknown,
+    demoWorker = false
+  ): Promise<T | undefined> {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method: "POST",
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...csrfHeaders(),
+        ...(demoWorker ? { "X-Internal-Worker-Token": "trustvault-demo-worker" } : {}),
         "X-Tenant-Id": tenantId
       },
       body: JSON.stringify(body)

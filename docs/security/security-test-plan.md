@@ -47,6 +47,9 @@
 - `X-Frame-Options: DENY` is present.
 - CORS blocks unknown origin.
 - mutating request without CSRF token is blocked.
+- browser-like mutating request without origin is blocked.
+- internal scan endpoints require worker authorization.
+- rate limiting does not use raw bearer tokens as limiter keys.
 - errors do not expose stack traces in production.
 
 ## CI Security Checks

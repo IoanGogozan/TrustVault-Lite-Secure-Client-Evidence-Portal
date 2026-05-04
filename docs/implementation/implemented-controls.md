@@ -72,13 +72,22 @@ External API:
 - API responses include baseline security headers.
 - CORS is allowlisted to local web origins.
 - Browser-origin mutating session requests require `X-CSRF-Token`.
+- Browser-like mutating session requests with missing or unknown origins are rejected.
 - API key Bearer requests are excluded from CSRF checks.
 - Request body size is limited at the Fastify boundary.
 - Error responses use stable error codes and do not expose stack traces.
 - Demo rate limits protect login, API keys, external API calls, share links, and uploads.
+- Rate limit subjects hash bearer tokens before they are used as limiter keys.
 - A Redis-compatible rate limiter adapter exists for multi-instance deployments.
 - Request shape validation rejects unknown body and query keys on current endpoints.
 - Production API logging redacts authorization headers, cookies, CSRF tokens, API keys, tokens, passwords, and file payloads.
+
+## Internal Worker Controls
+
+- Scan result updates require an internal worker token.
+- Scan job processing requires an internal worker token.
+- Local demos use `X-Internal-Worker-Token: trustvault-demo-worker`.
+- Production deployments should set `INTERNAL_WORKER_TOKEN` and keep scan endpoints off the public edge.
 
 ## DevSecOps
 

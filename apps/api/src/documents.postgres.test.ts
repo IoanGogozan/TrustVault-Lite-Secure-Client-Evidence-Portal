@@ -142,7 +142,7 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
     const scanResponse = await app.inject({
       method: "POST",
       url: `/document-versions/${uploadResponse.json().version.id}/scan-result`,
-      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId },
+      headers: internalWorkerHeaders(ownerCookie, tenantAId),
       payload: { scanStatus: "clean" }
     });
 
@@ -226,7 +226,7 @@ describe.skipIf(!runDbTests)("PostgreSQL document RLS integration", () => {
     await app.inject({
       method: "POST",
       url: `/document-versions/${uploadResponse.json().version.id}/scan-result`,
-      headers: { cookie: ownerCookie, "x-tenant-id": tenantAId },
+      headers: internalWorkerHeaders(ownerCookie, tenantAId),
       payload: { scanStatus: "clean" }
     });
 
@@ -538,6 +538,14 @@ function headerValue(value: string | string[] | number | undefined): string {
   }
 
   return typeof value === "string" ? value : "";
+}
+
+function internalWorkerHeaders(cookie: string, tenantId: string) {
+  return {
+    cookie,
+    "x-tenant-id": tenantId,
+    "x-internal-worker-token": "trustvault-demo-worker"
+  };
 }
 
 function pdfUploadPayload() {
