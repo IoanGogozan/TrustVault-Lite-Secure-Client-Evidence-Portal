@@ -158,7 +158,7 @@ jobs:
           npx --yes wait-on --timeout 300000 http://localhost:4000/health http://localhost:3000
 
       - name: ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.12.0
+        uses: zaproxy/action-baseline@v0.15.0
         timeout-minutes: 15
         with:
           target: http://localhost:3000
